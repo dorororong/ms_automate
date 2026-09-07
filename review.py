@@ -573,11 +573,13 @@ class ReviewWindow(tk.Toplevel):
             parts.append(f"실패 {outcome.failed}개 — 수정 후 다시 시도하세요")
         if outcome.duplicates:
             parts.append(f"중복 제외 {len(outcome.duplicates)}개")
+        if outcome.blocked:
+            parts.append("중복 확인 실패로 등록을 보류했습니다")
         if outcome.warning:
             parts.append(outcome.warning)
         self.status_var.set(" · ".join(parts))
         self._update_save_button()
-        if outcome.failed == 0:
+        if outcome.failed == 0 and not outcome.blocked:
             self._finish("registered")
 
     # --- JSON ---------------------------------------------------------

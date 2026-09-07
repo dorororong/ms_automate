@@ -236,7 +236,7 @@ class WorkItemCard:
         if self.item.type == CALENDAR:
             has_start = bool(self.at_var.get().strip())
             if not has_start and not any(
-                issue.code == "missing_execution_time"
+                issue.code in {"missing_execution_time", "invalid_execution_time"}
                 for issue in self.item.review_issues
             ):
                 self.item.review_issues.append(
@@ -248,12 +248,14 @@ class WorkItemCard:
                     )
                 )
             for issue in self.item.review_issues:
-                if issue.code == "missing_execution_time":
+                if issue.code in {"missing_execution_time", "invalid_execution_time"}:
                     issue.resolved = has_start
         has_due = bool(self.due_var.get().strip())
         for issue in self.item.review_issues:
-            if issue.code == "ambiguous_deadline_date":
+            if issue.code in {"ambiguous_deadline_date", "invalid_deadline_date"}:
                 issue.resolved = has_due
+            if issue.code == "invalid_deadline_time":
+                issue.resolved = bool(self.due_time_var.get().strip())
         if self.item.excluded_reason and self._current_signature() != self._excluded_signature:
             # 제목·일시·분류를 고치는 것은 중복을 해결하려는 명시적 수정이다.
             self.item.excluded_reason = None
@@ -357,11 +359,15 @@ class WorkItemCard:
         review_issues = list(self.item.review_issues)
         if self.at_var.get().strip():
             for issue in review_issues:
-                if issue.code == "missing_execution_time":
+                if issue.code in {"missing_execution_time", "invalid_execution_time"}:
                     issue.resolved = True
         if self.due_var.get().strip():
             for issue in review_issues:
-                if issue.code == "ambiguous_deadline_date":
+                if issue.code in {"ambiguous_deadline_date", "invalid_deadline_date"}:
+                    issue.resolved = True
+        if self.due_time_var.get().strip():
+            for issue in review_issues:
+                if issue.code == "invalid_deadline_time":
                     issue.resolved = True
         item = WorkItem(
             id=self.item.id,

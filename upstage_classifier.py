@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -45,7 +46,11 @@ API_KEY_ENV_NAMES = ("UPSTAGE_API", "UPSTAGE_API_KEY", "SOLAR_API_KEY")
 # solar-pro4 호출은 백그라운드 대기열에서 처리하고, 결과창은 응답이 끝난
 # 뒤에만 보여 준다. 빠른 결과를 위해 추론 확장은 사용하지 않는다.
 REASONING_EFFORT = "none"
-REQUEST_TIMEOUT_SECONDS = 20.0
+# The measured p95 response time was about 50 seconds.  A 20-second cutoff
+# caused otherwise valid AI results to fall back to the weaker rule parser.
+REQUEST_TIMEOUT_SECONDS = 60.0
+RETRY_TIMEOUT_SECONDS = 90.0
+MAX_API_ATTEMPTS = 2
 
 PROFILE_PATH = Path(__file__).resolve().parent / "profile.json"
 DEFAULT_ROLE = "중학교 담임 교사"
@@ -86,6 +91,7 @@ WORK_ITEM_SCHEMA: dict[str, Any] = {
                     "at": {"type": ["string", "null"]},
                     "due": {"type": ["string", "null"]},
                     "due_time": {"type": ["string", "null"]},
+                    "all_day": {"type": "boolean"},
                     "location": {"type": ["string", "null"]},
                     "reminder_minutes": {"type": ["integer", "null"]},
                     "repeat_freq": {"type": "string", "enum": list(REPEAT_FREQS)},
@@ -157,7 +163,7 @@ WORK_ITEM_SCHEMA: dict[str, Any] = {
                 "required": [
                     "scope", "type", "title", "detail", "intent",
                     "applicability", "condition", "source_state", "at", "due",
-                    "due_time", "location", "reminder_minutes", "repeat_freq",
+                    "due_time", "all_day", "location", "reminder_minutes", "repeat_freq",
                     "repeat_detail", "temporal_context", "checklist", "evidence",
                     "review_issues", "group_id", "urgency",
                 ],
@@ -166,6 +172,31 @@ WORK_ITEM_SCHEMA: dict[str, Any] = {
     },
     "required": ["items"],
 }
+
+REQUIRED_ITEM_FIELDS = (
+    "scope",
+    "type",
+    "title",
+    "detail",
+    "intent",
+    "applicability",
+    "condition",
+    "source_state",
+    "at",
+    "due",
+    "due_time",
+    "all_day",
+    "location",
+    "reminder_minutes",
+    "repeat_freq",
+    "repeat_detail",
+    "temporal_context",
+    "checklist",
+    "evidence",
+    "review_issues",
+    "group_id",
+    "urgency",
+)
 
 
 def load_local_env(path: str | Path | None = None) -> None:
@@ -259,21 +290,29 @@ TAXONOMY = """## 1차 분류 (scope)
 SEMANTIC_RULES = """## 행동 단위와 날짜의 관계 (가장 중요)
 - 항목 수는 날짜 수·번호 수·문장 수가 아니라 **독립된 사용자 행동 수**로 정합니다.
   한 항목을 완료해도 별도의 행동이 남는 경우에만 나눕니다.
-- 모집·희망자·신청·회신 요청은 `apply` 또는 `reply` 1건으로 만들고,
-  `applicability=conditional`로 둡니다. 기본 등록은 조건을 확인하기 전까지 선택 해제합니다.
+- 모집·선착순·희망자·신청·회신 요청은 `apply` 또는 `reply` 1건으로 만들고,
+  모집 대상 행사일은 그 행동의 `event_context`로만 남깁니다. 행사 참석이 확정되었다는
+  문장이 없으면 별도 Calendar를 만들지 않습니다.
+- "반드시", "제출하세요", "기한 내", "참석 바랍니다"처럼 수신자가 해야 한다고
+  명시한 행동은 `applicability=required`입니다. "희망자", "가능한 분", "해당자",
+  "있으시면", "선택"처럼 조건이 붙은 행동만 `conditional`입니다.
 - 모집 공지에 함께 적힌 행사일은 신청 행동의 `event_context`입니다. 행사 참석이
   확정되었다는 근거가 없으면 별도의 Calendar 항목으로 만들지 않습니다.
 - 행사일과 접수 마감이 함께 있어도 같은 신청 행동에 연결합니다. `당일`, `그날`처럼
   날짜를 확정할 수 없는 마감은 `due=null`, `due_time`만 보존하고 review_issues에 확인 사유를 남깁니다.
 - `type=calendar`는 사용자가 그 시각에 참석·수행하는 주 행동, `type=todo`는 신청·회신·제출·준비·안내 등
   그 전까지 처리하는 행동입니다. 관련 날짜만 있는 경우 type을 calendar로 만들지 않습니다.
+- 시계 시각이 없는 날짜·기간·요일·교시·아침/오후만으로 `at`을 만들지 않습니다.
+  Calendar는 원문에 정확한 시각이 있거나, 원문이 종일 행사라고 명시한 경우에만 만듭니다.
+  `4교시`, `오전`, `당일`은 temporal_context에 보존하고 HH:MM으로 추정하지 않습니다.
 - `at`은 주 행동의 execution, `due`와 `due_time`은 주 행동의 deadline입니다.
   나머지 모든 날짜는 temporal_context에 역할을 붙여 남깁니다:
   execution / deadline / event_context / external_deadline / constraint / historical.
 - 같은 업무의 세부 입력값은 checklist로 묶습니다. 별도 산출물·별도 담당·별도 완료가 명시될 때만 분리합니다.
-- 완료·전달됨·처리함은 `source_state=completed`로, 단순 공지는 `informational`로 둡니다.
-  인용문 안의 끝난 업무를 새 미완료 항목으로 만들지 않습니다.
-- 근거가 되는 짧은 원문 구절을 evidence에 넣고, 모호하거나 필수 정보가 없으면 review_issues에 기록합니다.
+- 완료·전달됨·처리함만 있는 메시지는 `items=[]`로 둡니다. 아직 해야 할 후속 행동이
+  함께 있으면 그 후속 행동만 `pending`으로 만들고, 이미 끝난 행동은 만들지 않습니다.
+- 모든 항목은 제목·대상·시점·조건을 뒷받침하는 짧은 원문 구절을 evidence에 넣습니다.
+  근거가 없거나 필수 정보가 없으면 임의로 채우지 말고 review_issues에 기록합니다.
 
 ### 대표 예시
 `토익 시험 감독관 모집 / 일시 2026-08-23 08:30 / 당일 오전 10시까지 접수`
@@ -282,12 +321,17 @@ SEMANTIC_RULES = """## 행동 단위와 날짜의 관계 (가장 중요)
 
 FIELD_RULES = """## 시점 — 라벨을 붙이지 말고 사실만 채우세요
 - type: 주 행동이 실제로 수행되는 시점이면 calendar, 기한 전 처리하는 행동이면 todo
-- at: 그 시각에 참석하거나 바로 그때 하면 되는 주 행동의 일시 "YYYY-MM-DDTHH:MM:SS"
+- at: 그 시각에 참석하거나 바로 그때 하면 되는 주 행동의 일시 "YYYY-MM-DDTHH:MM:SS".
+  시각이 없는 날짜만 있으면 null로 두고 해당 날짜를 temporal_context에 남깁니다.
 - due: 그때까지 끝내야 하는 주 행동의 날짜 "YYYY-MM-DD"
 - due_time: 주 행동의 마감 시각 "HH:MM". 날짜가 불명확해도 시각이 있으면 보존하세요.
 - at과 due가 원문에 함께 나와도 주 행동에 해당하지 않는 날짜는 temporal_context로 옮기고,
   주 행동의 type에 맞는 기본 필드만 채우세요.
 - 마감이 명시되지 않았으면 due 를 지어내지 말고 null 로 두세요.
+- 기준일시·발송일시는 상대 날짜 계산에만 사용합니다. 원문에 없는 날짜·시각을
+  현재 날짜나 행사 날짜로 추정해 due/at에 넣지 마세요.
+- `all_day=true`는 원문에 종일·하루 행사라고 명시된 Calendar에만 사용합니다.
+  날짜만 있다는 이유로 `all_day=true` 또는 `00:00`을 만들지 마세요.
 
 ## 의미 필드
 - intent: apply/reply/attend/submit/prepare/inform/supervise/complete_training/other 중 하나
@@ -309,6 +353,7 @@ FIELD_RULES = """## 시점 — 라벨을 붙이지 말고 사실만 채우세요
 - reminder_minutes: 몇 분 전 알림이 필요하다고 적혀 있으면 그 값, 없으면 null
 - urgency: 바로/최대한 빨리 해야 하면 "즉시", 아니면 "보통"
 - 한 메시지에 여러 **독립 행동**이 있으면 각각 별도 항목으로 분리하세요. 날짜·조건·세부값만 다르면 먼저 한 항목으로 묶으세요.
+- JSON의 모든 필드를 빠짐없이 출력하세요. `items`가 비어 있는 경우는 행동이 없을 때만 허용합니다.
 JSON 이외의 설명, Markdown 코드 펜스, 추론 내용을 출력하지 마세요."""
 
 
@@ -392,6 +437,50 @@ def _normalise_datetime(value: Any) -> str | None:
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone().replace(tzinfo=None)
     return parsed.isoformat(timespec="seconds")
+
+
+def _has_explicit_clock(value: Any) -> bool:
+    """Return whether a datetime string contains an actual clock time."""
+
+    text = _optional_text(value)
+    return bool(text and re.search(r"(?:T|\s)\d{1,2}:\d{2}", text))
+
+
+def _clock_is_in_source(value: Any, source: str) -> bool:
+    """Reject a model-generated clock that never appears in the message."""
+
+    text = _optional_text(value)
+    if not text:
+        return False
+    match = re.search(r"(?:T|\s)(\d{1,2}):(\d{2})", text)
+    if not match:
+        return False
+    hour, minute = int(match.group(1)), int(match.group(2))
+    compact = re.sub(r"\s+", "", source)
+    exact = (
+        f"{hour:02d}:{minute:02d}",
+        f"{hour}:{minute:02d}",
+        f"{hour:02d}시{minute:02d}분",
+        f"{hour}시{minute:02d}분",
+    )
+    if any(token in compact for token in exact):
+        return True
+    hour12 = hour % 12 or 12
+    period_tokens = (
+        f"오전{hour12}:{minute:02d}",
+        f"오후{hour12}:{minute:02d}",
+        f"오전{hour12}시{minute:02d}분",
+        f"오후{hour12}시{minute:02d}분",
+    )
+    if any(token in compact for token in period_tokens):
+        return True
+    if minute == 0:
+        if any(token in compact for token in (f"{hour:02d}시", f"{hour}시")):
+            return True
+        for period in ("오전", "오후"):
+            if f"{period}{hour12}시" in compact:
+                return True
+    return False
 
 
 def _normalise_reminder_minutes(value: Any) -> int | None:
@@ -486,41 +575,107 @@ def _to_classification(data: Any, original_text: str) -> ClassificationResult:
         data = {"items": data}
     if not isinstance(data, dict):
         raise UpstageAPIError("Solar Pro 4 응답이 JSON object가 아닙니다.")
+    if "items" not in data:
+        raise UpstageAPIError("Solar Pro 4 JSON에 items 필드가 없습니다.")
     raw_items = data.get("items", [])
     if not isinstance(raw_items, list):
         raise UpstageAPIError("Solar Pro 4 JSON의 items가 배열이 아닙니다.")
 
     work_items: list[WorkItem] = []
     ignored: list[str] = []
-    for raw in raw_items:
+    for item_number, raw in enumerate(raw_items, start=1):
         if not isinstance(raw, dict):
-            continue
+            raise UpstageAPIError(f"Solar Pro 4 items[{item_number}]가 object가 아닙니다.")
+        missing = [field for field in REQUIRED_ITEM_FIELDS if field not in raw]
+        if missing:
+            fields = ", ".join(missing[:5])
+            suffix = " 외" if len(missing) > 5 else ""
+            raise UpstageAPIError(
+                f"Solar Pro 4 items[{item_number}]에 필수 필드가 없습니다: {fields}{suffix}"
+            )
         title = str(raw.get("title", "")).strip()
         if not title:
-            continue
+            raise UpstageAPIError(f"Solar Pro 4 items[{item_number}]의 title이 비어 있습니다.")
         scope = str(raw.get("scope", "")).strip()
         if scope not in SCOPES:
-            scope = SCOPE_WORK
+            raise UpstageAPIError(f"Solar Pro 4 items[{item_number}]의 scope가 올바르지 않습니다.")
 
         raw_type = str(raw.get("type", "")).strip().lower()
         if raw_type not in {CALENDAR, TODO}:
-            raw_type = ""
+            raise UpstageAPIError(f"Solar Pro 4 items[{item_number}]의 type이 올바르지 않습니다.")
         intent = str(raw.get("intent", "other")).strip()
         if intent not in INTENTS:
-            intent = "other"
+            raise UpstageAPIError(f"Solar Pro 4 items[{item_number}]의 intent가 올바르지 않습니다.")
         applicability = str(raw.get("applicability", "required")).strip()
         if applicability not in APPLICABILITIES:
-            applicability = "unknown"
+            raise UpstageAPIError(
+                f"Solar Pro 4 items[{item_number}]의 applicability가 올바르지 않습니다."
+            )
         source_state = str(raw.get("source_state", "pending")).strip()
         if source_state not in SOURCE_STATES:
-            source_state = "unknown"
+            raise UpstageAPIError(
+                f"Solar Pro 4 items[{item_number}]의 source_state가 올바르지 않습니다."
+            )
 
-        at = _normalise_datetime(raw.get("at"))
-        due = _normalise_date(raw.get("due"))
-        due_time = _normalise_time(raw.get("due_time"))
+        all_day = raw.get("all_day")
+        if not isinstance(all_day, bool):
+            raise UpstageAPIError(f"Solar Pro 4 items[{item_number}]의 all_day가 boolean이 아닙니다.")
+
+        raw_at = _optional_text(raw.get("at"))
+        raw_due = _optional_text(raw.get("due"))
+        raw_due_time = _optional_text(raw.get("due_time"))
+        condition = _optional_text(raw.get("condition"))
+        at = _normalise_datetime(raw_at)
+        due = _normalise_date(raw_due)
+        due_time = _normalise_time(raw_due_time)
         contexts = _normalise_temporal_contexts(raw.get("temporal_context"))
         issues = _normalise_review_issues(raw.get("review_issues"))
         evidence = _normalise_evidence(raw.get("evidence"))
+        derived_issues: list[ReviewIssue] = list(issues)
+
+        uncertainty_codes = {
+            "missing_execution_time",
+            "relative_date",
+            "ambiguous_deadline_date",
+            "uncertain_time",
+        }
+        for issue in derived_issues:
+            message = issue.message.casefold()
+            if (
+                issue.code.casefold() in uncertainty_codes
+                or "추정" in message
+                or "불확실" in message
+                or "시각이 없어" in message
+            ):
+                # The model has already admitted that this field is uncertain.
+                # Preserve the item for editing, but prevent one-click saving.
+                issue.blocking = True
+
+        def add_issue(issue: ReviewIssue) -> None:
+            if not any(existing.code == issue.code and existing.field == issue.field for existing in derived_issues):
+                derived_issues.append(issue)
+
+        if raw_at and at is None:
+            add_issue(ReviewIssue(
+                code="invalid_execution_time",
+                field="at",
+                message="수행 시각 형식을 이해하지 못해 등록할 수 없습니다.",
+                blocking=True,
+            ))
+        if raw_due and due is None:
+            add_issue(ReviewIssue(
+                code="invalid_deadline_date",
+                field="due",
+                message="마감 날짜 형식을 이해하지 못해 등록할 수 없습니다.",
+                blocking=True,
+            ))
+        if raw_due_time and due_time is None:
+            add_issue(ReviewIssue(
+                code="invalid_deadline_time",
+                field="due_time",
+                message="마감 시각 형식을 이해하지 못해 등록할 수 없습니다.",
+                blocking=True,
+            ))
         checklist_raw = raw.get("checklist", [])
         checklist = (
             [str(value).strip() for value in checklist_raw if str(value).strip()]
@@ -528,14 +683,54 @@ def _to_classification(data: Any, original_text: str) -> ClassificationResult:
             else []
         )[:30]
 
-        if not raw_type:
-            raw_type = CALENDAR if at else TODO
         # Keep the primary target separate from related dates. When the model
         # sends both at and due, the non-primary one becomes context instead
         # of generating a second WorkItem or silently losing the date.
         if raw_type == CALENDAR:
             primary_start = at
             primary_due = None
+            if at and raw_at and not _has_explicit_clock(raw_at) and not all_day:
+                contexts.append(
+                    TemporalContext(
+                        role="execution",
+                        label="시각 없는 수행 날짜",
+                        raw_text=raw_at,
+                        date=at[:10],
+                        precision="date",
+                        resolution="explicit",
+                    )
+                )
+                primary_start = None
+                add_issue(ReviewIssue(
+                    code="missing_execution_time",
+                    field="start",
+                    message="날짜만 있어 Calendar 시각을 정할 수 없습니다. 시각을 확인하세요.",
+                    blocking=True,
+                ))
+            elif (
+                at
+                and raw_at
+                and not all_day
+                and not _clock_is_in_source(raw_at, original_text)
+            ):
+                contexts.append(
+                    TemporalContext(
+                        role="execution",
+                        label="원문에서 확인되지 않은 수행 시각",
+                        raw_text=raw_at,
+                        date=at[:10],
+                        time=at[11:16],
+                        precision="datetime",
+                        resolution="inferred",
+                    )
+                )
+                primary_start = None
+                add_issue(ReviewIssue(
+                    code="execution_time_not_in_source",
+                    field="start",
+                    message="모델이 만든 수행 시각을 원문에서 확인하지 못했습니다. 시각을 확인하세요.",
+                    blocking=True,
+                ))
             if due or due_time:
                 contexts.append(
                     TemporalContext(
@@ -558,14 +753,41 @@ def _to_classification(data: Any, original_text: str) -> ClassificationResult:
                     TemporalContext(
                         role="execution",
                         label="관련 수행 시각",
-                        raw_text="",
+                        raw_text=raw_at or "",
                         date=at[:10],
-                        time=at[11:16] if len(at) >= 16 else None,
-                        precision="datetime",
+                        time=at[11:16] if raw_at and _has_explicit_clock(raw_at) else None,
+                        precision="datetime" if raw_at and _has_explicit_clock(raw_at) else "date",
                         resolution="explicit",
                     )
                 )
                 at = None
+            if all_day:
+                add_issue(ReviewIssue(
+                    code="all_day_not_calendar",
+                    field="all_day",
+                    message="종일 표시는 Calendar 항목에서만 사용할 수 있습니다.",
+                    blocking=True,
+                ))
+                all_day = False
+
+        if applicability == "required" and condition:
+            # The model supplied a condition but labelled the item required.
+            # Treat the safer interpretation as conditional until the user
+            # confirms it in the card.
+            applicability = "conditional"
+            add_issue(ReviewIssue(
+                code="required_condition_conflict",
+                field="applicability",
+                message="조건이 함께 제시되어 조건부 항목으로 보류했습니다.",
+                blocking=False,
+            ))
+        if applicability == "conditional" and not condition:
+            add_issue(ReviewIssue(
+                code="missing_condition",
+                field="condition",
+                message="조건부 항목의 조건 근거가 없어 확인이 필요합니다.",
+                blocking=True,
+            ))
 
         group_id = _optional_text(raw.get("group_id"))
         item = WorkItem(
@@ -577,6 +799,7 @@ def _to_classification(data: Any, original_text: str) -> ClassificationResult:
             due_time=due_time,
             description=str(raw.get("detail", "")).strip()[:4000],
             location=_optional_text(raw.get("location")),
+            all_day=all_day,
             reminder_minutes=_normalise_reminder_minutes(raw.get("reminder_minutes")),
             repeat_freq=(
                 str(raw.get("repeat_freq", "none")).strip()
@@ -586,12 +809,12 @@ def _to_classification(data: Any, original_text: str) -> ClassificationResult:
             repeat_detail=str(raw.get("repeat_detail", "")).strip()[:300],
             intent=intent,
             applicability=applicability,
-            condition=_optional_text(raw.get("condition")),
+            condition=condition,
             source_state=source_state,
             temporal_context=contexts[:30],
             checklist=checklist,
             evidence=evidence,
-            review_issues=issues,
+            review_issues=derived_issues,
             group_id=group_id,
         )
         if item.scope == SCOPE_REFERENCE:
@@ -600,38 +823,67 @@ def _to_classification(data: Any, original_text: str) -> ClassificationResult:
         if item.applicability != "required" or item.source_state != "pending":
             item.selected = False
         if item.type == CALENDAR and not item.start:
-            item.review_issues.append(
-                ReviewIssue(
-                    code="missing_execution_time",
-                    field="start",
-                    message="수행·참석 시각이 없어 등록 전에 확인이 필요합니다.",
-                    blocking=True,
-                )
+            add_issue(ReviewIssue(
+                code="missing_execution_time",
+                field="start",
+                message="수행·참석 시각이 없어 등록 전에 확인이 필요합니다.",
+                blocking=True,
+            )
             )
             item.selected = False
         for evidence_item in item.evidence:
             if not _quote_exists(evidence_item.quote, original_text):
-                item.review_issues.append(
-                    ReviewIssue(
-                        code="evidence_not_found",
-                        field=evidence_item.field,
-                        message="모델이 제시한 근거 문장을 원문에서 그대로 확인하지 못했습니다.",
-                        blocking=False,
-                    )
+                add_issue(ReviewIssue(
+                    code="evidence_not_found",
+                    field=evidence_item.field,
+                    message="모델이 제시한 근거 문장을 원문에서 그대로 확인하지 못했습니다.",
+                    blocking=False,
+                )
                 )
                 break
         if not item.evidence:
-            item.review_issues.append(
-                ReviewIssue(
-                    code="missing_evidence",
-                    field="evidence",
-                    message="추출 근거 문장이 없어 원문을 확인해 주세요.",
-                    blocking=False,
-                )
+            add_issue(ReviewIssue(
+                code="missing_evidence",
+                field="evidence",
+                message="추출 근거 문장이 없어 원문을 확인해 주세요.",
+                blocking=False,
             )
+            )
+        if item.blocking_review_issues:
+            item.selected = False
         work_items.append(item)
 
     return ClassificationResult(work_items=work_items, ignored=ignored)
+
+
+def _parse_api_response(response: Any, original_text: str) -> ClassificationResult:
+    try:
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("응답 content가 비어 있습니다.")
+        data = json.loads(_strip_json_fence(content))
+    except (AttributeError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise UpstageAPIError(f"Solar Pro 4 응답 JSON 파싱 실패: {exc}") from exc
+    return _to_classification(data, original_text)
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    message = str(error).casefold()
+    retry_markers = (
+        "timeout",
+        "timed out",
+        "time-out",
+        "connection",
+        "temporarily",
+        "429",
+        "502",
+        "503",
+        "504",
+        "json",
+        "items 필드",
+        "필수 필드",
+    )
+    return any(marker in message for marker in retry_markers)
 
 
 def classify_with_upstage(
@@ -656,12 +908,6 @@ def classify_with_upstage(
             "openai 패키지가 없습니다. `python -m pip install -r requirements.txt`를 실행하세요."
         ) from exc
 
-    client = OpenAI(
-        api_key=key,
-        base_url=UPSTAGE_BASE_URL,
-        timeout=REQUEST_TIMEOUT_SECONDS,
-        max_retries=0,
-    )
     request_args: dict[str, Any] = {
         "model": selected_model,
         "messages": [
@@ -681,25 +927,35 @@ def classify_with_upstage(
         },
         "reasoning_effort": REASONING_EFFORT,
     }
-    try:
-        response = client.chat.completions.create(**request_args)
-    except Exception as exc:
-        message = str(exc)
-        if "response_format" not in message.lower() and "json_schema" not in message.lower():
-            raise UpstageAPIError(f"Upstage API 호출 실패: {message}") from exc
-        # Older OpenAI-compatible gateways may accept JSON object mode but not
-        # the stricter schema wrapper. Keep a safe parsing/validation boundary.
-        request_args["response_format"] = {"type": "json_object"}
+    last_error: UpstageAPIError | None = None
+    for attempt in range(MAX_API_ATTEMPTS):
+        timeout = RETRY_TIMEOUT_SECONDS if attempt else REQUEST_TIMEOUT_SECONDS
+        client = OpenAI(
+            api_key=key,
+            base_url=UPSTAGE_BASE_URL,
+            timeout=timeout,
+            max_retries=0,
+        )
+        attempt_args = dict(request_args)
         try:
-            response = client.chat.completions.create(**request_args)
-        except Exception as fallback_exc:
-            raise UpstageAPIError(f"Upstage JSON 호출 실패: {fallback_exc}") from fallback_exc
+            try:
+                response = client.chat.completions.create(**attempt_args)
+            except Exception as exc:
+                message = str(exc)
+                if "response_format" not in message.casefold() and "json_schema" not in message.casefold():
+                    raise UpstageAPIError(f"Upstage API 호출 실패: {message}") from exc
+                # Older OpenAI-compatible gateways may accept JSON object mode
+                # but not the stricter schema wrapper.
+                attempt_args["response_format"] = {"type": "json_object"}
+                try:
+                    response = client.chat.completions.create(**attempt_args)
+                except Exception as fallback_exc:
+                    raise UpstageAPIError(f"Upstage JSON 호출 실패: {fallback_exc}") from fallback_exc
+            return _parse_api_response(response, text)
+        except UpstageAPIError as exc:
+            last_error = exc
+            if attempt + 1 >= MAX_API_ATTEMPTS or not _is_retryable_error(exc):
+                raise
+            time.sleep(0.25)
 
-    try:
-        content = response.choices[0].message.content
-        if not content:
-            raise ValueError("응답 content가 비어 있습니다.")
-        data = json.loads(_strip_json_fence(content))
-    except (AttributeError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise UpstageAPIError(f"Solar Pro 4 응답 JSON 파싱 실패: {exc}") from exc
-    return _to_classification(data, text)
+    raise last_error or UpstageAPIError("Solar Pro 4 호출에 실패했습니다.")

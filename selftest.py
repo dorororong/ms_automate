@@ -23,6 +23,37 @@ SAMPLE = """담임 선생님께 부탁드립니다.
 REFERENCE_DATE = "2026-08-24"
 
 
+def structured_item(**changes: object) -> dict[str, object]:
+    """Build one complete Solar response item for parser regression checks."""
+
+    item: dict[str, object] = {
+        "scope": "업무",
+        "type": "todo",
+        "title": "자료 제출",
+        "detail": "자료를 제출합니다.",
+        "intent": "submit",
+        "applicability": "required",
+        "condition": None,
+        "source_state": "pending",
+        "at": None,
+        "due": "2026-09-10",
+        "due_time": None,
+        "all_day": False,
+        "location": None,
+        "reminder_minutes": None,
+        "repeat_freq": "none",
+        "repeat_detail": "",
+        "temporal_context": [],
+        "checklist": [],
+        "evidence": [{"segment_id": "current", "field": "title", "quote": "자료 제출"}],
+        "review_issues": [],
+        "group_id": "g1",
+        "urgency": "보통",
+    }
+    item.update(changes)
+    return item
+
+
 def check(label: str, ok: bool, detail: str = "") -> bool:
     print(f"  {'OK  ' if ok else 'FAIL'} {label}" + (f" - {detail}" if detail else ""))
     return ok
@@ -137,6 +168,151 @@ def main() -> int:
             and loaded.applicability == "conditional"
             and bool(loaded.temporal_context)
             and bool(loaded.evidence),
+        ))
+
+    print("\n[8] Solar 응답 하네스·등록 안전장치")
+    from upstage_classifier import (
+        MAX_API_ATTEMPTS,
+        REQUEST_TIMEOUT_SECONDS,
+        UpstageAPIError,
+        _to_classification,
+    )
+    results.append(check(
+        "API 제한시간·재시도 기준",
+        REQUEST_TIMEOUT_SECONDS >= 50 and MAX_API_ATTEMPTS >= 2,
+        f"timeout={REQUEST_TIMEOUT_SECONDS}s, attempts={MAX_API_ATTEMPTS}",
+    ))
+    try:
+        _to_classification({}, "자료 제출")
+    except UpstageAPIError:
+        results.append(check("items 누락 응답 거부", True))
+    else:
+        results.append(check("items 누락 응답 거부", False))
+
+    malformed = structured_item()
+    malformed.pop("scope")
+    try:
+        _to_classification({"items": [malformed]}, "자료 제출")
+    except UpstageAPIError:
+        results.append(check("필수 필드 누락 응답 거부", True))
+    else:
+        results.append(check("필수 필드 누락 응답 거부", False))
+
+    date_only = _to_classification(
+        {"items": [structured_item(
+            title="행사 참석",
+            type="calendar",
+            at="2026-09-10",
+            due=None,
+            intent="attend",
+            evidence=[{"segment_id": "current", "field": "at", "quote": "9월 10일"}],
+        )]},
+        "9월 10일 행사 참석",
+    ).work_items[0]
+    results.append(check(
+        "날짜만 있는 Calendar 차단",
+        date_only.start is None
+        and any(issue.code == "missing_execution_time" for issue in date_only.review_issues)
+        and not date_only.selected,
+    ))
+
+    guessed_time = _to_classification(
+        {"items": [structured_item(
+            title="교시 임장",
+            type="calendar",
+            at="2026-09-10T09:00:00",
+            due=None,
+            intent="attend",
+            evidence=[{"segment_id": "current", "field": "at", "quote": "2교시"}],
+        )]},
+        "9월 10일 2교시 임장",
+    ).work_items[0]
+    results.append(check(
+        "원문에 없는 시각 추정 차단",
+        guessed_time.start is None
+        and any(issue.code == "execution_time_not_in_source" for issue in guessed_time.review_issues)
+        and not guessed_time.selected,
+    ))
+
+    all_day = _to_classification(
+        {"items": [structured_item(
+            title="개교기념일",
+            type="calendar",
+            at="2026-09-10",
+            due=None,
+            intent="attend",
+            all_day=True,
+            evidence=[{"segment_id": "current", "field": "at", "quote": "9월 10일"}],
+        )]},
+        "9월 10일 개교기념일 종일",
+    ).work_items[0]
+    results.append(check(
+        "명시된 종일 Calendar 허용",
+        all_day.start == "2026-09-10T00:00:00"
+        and all_day.all_day
+        and all_day.can_register,
+    ))
+
+    conditional = _to_classification(
+        {"items": [structured_item(
+            title="희망자 신청",
+            due=None,
+            intent="apply",
+            applicability="conditional",
+            evidence=[{"segment_id": "current", "field": "title", "quote": "희망자 신청"}],
+        )]},
+        "희망자 신청",
+    ).work_items[0]
+    results.append(check(
+        "조건 누락 조건부 항목 차단",
+        not conditional.selected
+        and any(issue.code == "missing_condition" for issue in conditional.review_issues),
+    ))
+
+    contradictory = _to_classification(
+        {"items": [structured_item(
+            title="해당자 제출",
+            condition="해당자만 제출",
+            evidence=[{"segment_id": "current", "field": "condition", "quote": "해당자만 제출"}],
+        )]},
+        "해당자만 제출",
+    ).work_items[0]
+    results.append(check(
+        "조건이 있는 필수 항목은 조건부로 보류",
+        contradictory.applicability == "conditional"
+        and not contradictory.selected,
+    ))
+
+    from service import WorkflowService
+    fallback_item = WorkItem(type="todo", title="규칙 결과 확인")
+    WorkflowService._mark_ai_fallback([fallback_item])
+    results.append(check(
+        "AI 실패 결과는 명시 선택 필요",
+        not fallback_item.selected
+        and any(issue.code == "ai_fallback" for issue in fallback_item.review_issues),
+    ))
+
+    class FailingOutlook:
+        def __init__(self) -> None:
+            self.saved = 0
+
+        def read_entries(self, limit: int = 200) -> list[object]:
+            raise OutlookUnavailableError("selftest duplicate read failure")
+
+        def save_work_item(self, item: WorkItem) -> str | None:
+            self.saved += 1
+            return "unexpected"
+
+    with TemporaryDirectory() as temp_dir:
+        failing_outlook = FailingOutlook()
+        workflow = WorkflowService(
+            database=Database(Path(temp_dir) / "guard.sqlite3"),
+            outlook=failing_outlook,
+        )
+        outcome = workflow.record([WorkItem(type="todo", title="중복 확인 필수")])
+        results.append(check(
+            "중복 조회 실패 시 등록 보류",
+            outcome.blocked and outcome.saved == 0 and failing_outlook.saved == 0,
         ))
 
     if not args.offline:

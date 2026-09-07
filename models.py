@@ -312,6 +312,8 @@ class WorkItem:
             raise ValueError(f"지원하지 않는 repeat_freq입니다: {self.repeat_freq}")
         if not self.title.strip():
             raise ValueError("제목은 비워둘 수 없습니다.")
+        if self.type == CALENDAR and not self.start:
+            raise ValueError("Calendar 항목의 수행 날짜와 시간이 필요합니다.")
         if self.all_day and self.type != CALENDAR:
             raise ValueError("종일 일정은 Calendar 항목에만 사용할 수 있습니다.")
         if self.reminder_minutes is not None and not 0 <= self.reminder_minutes <= 10080:

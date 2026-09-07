@@ -104,6 +104,7 @@ class RecordOutcome:
     errors: dict[int, str] = field(default_factory=dict)  # index → message
     duplicates: dict[int, str] = field(default_factory=dict)  # index → reason
     warning: str | None = None
+    blocked: bool = False  # 등록 전 필수 검사 실패
 
 
 def _normalise_title(value: str) -> str:
@@ -212,9 +213,12 @@ class WorkflowService:
             sent_at=sent_at,
         )
         self._apply_selection_policy(result.work_items)
+        if warning and source == "offline":
+            self._mark_ai_fallback(result.work_items)
         context: dict[str, object] = {
             "schema_version": 2,
-            "prompt_version": "semantic-v2",
+            "prompt_version": "semantic-v3-strict",
+            "validation_version": "strict-v1",
             "sent_at": sent_at,
             "reference_date": reference_date,
             "reference_source": reference_source,
@@ -222,6 +226,7 @@ class WorkflowService:
             "input_source": input_source,
             "source": source,
             "model": model,
+            "fallback": bool(warning and source == "offline"),
         }
         input_id = self.database.create_input(text, result.work_items, context=context)
         return Analysis(
@@ -269,6 +274,24 @@ class WorkflowService:
                 item.selected = False
             if item.blocking_review_issues:
                 item.selected = False
+
+    @staticmethod
+    def _mark_ai_fallback(work_items: list[WorkItem]) -> None:
+        """Require an explicit click after an AI failure switches to rules."""
+
+        for item in work_items:
+            if item.outlook_target is None or item.source_state != "pending":
+                continue
+            item.selected = False
+            if not any(issue.code == "ai_fallback" for issue in item.review_issues):
+                item.review_issues.append(
+                    ReviewIssue(
+                        code="ai_fallback",
+                        field="source",
+                        message="AI 분석에 실패해 오프라인 규칙 결과를 표시했습니다. 등록 전 내용을 확인하세요.",
+                        blocking=False,
+                    )
+                )
 
     # --- duplicate guard ---------------------------------------------
 
@@ -387,11 +410,12 @@ class WorkflowService:
             OutlookUnavailableError,
             OutlookOperationError,
         ) as exc:
-            # Saving can still produce a useful error for an unavailable
-            # Outlook profile.  Keep the write path alive, but make the loss
-            # of the duplicate guard visible in the review status.
-            conflicts = {}
+            # The duplicate guard is a safety precondition.  If Outlook
+            # cannot be read, proceeding would violate the user's
+            # "overlapping items are excluded" rule.
+            outcome.blocked = True
             outcome.warning = f"중복 확인을 건너뛰었습니다: {exc}"
+            return outcome
 
         for index, item in enumerate(drafts):
             if index in conflicts:
