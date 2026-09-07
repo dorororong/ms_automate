@@ -15,6 +15,7 @@ import json
 import os
 import re
 import time
+from compact_extraction import RULES as COMPACT_RULES, SCHEMA as COMPACT_SCHEMA, expand as expand_compact
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,6 @@ from models import (
     CALENDAR,
     REPEAT_FREQS,
     SCOPE_REFERENCE,
-    SCOPE_WORK,
     SCOPES,
     TODO,
     APPLICABILITIES,
@@ -64,114 +64,6 @@ class UpstageAPIError(RuntimeError):
     """Raised when Upstage cannot produce a valid classification."""
 
 
-WORK_ITEM_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "items": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "scope": {"type": "string", "enum": list(SCOPES)},
-                    "type": {"type": "string", "enum": [CALENDAR, TODO]},
-                    "title": {"type": "string"},
-                    "detail": {"type": "string"},
-                    "intent": {"type": "string", "enum": list(INTENTS)},
-                    "applicability": {
-                        "type": "string",
-                        "enum": list(APPLICABILITIES),
-                    },
-                    "condition": {"type": ["string", "null"]},
-                    "source_state": {
-                        "type": "string",
-                        "enum": list(SOURCE_STATES),
-                    },
-                    "at": {"type": ["string", "null"]},
-                    "due": {"type": ["string", "null"]},
-                    "due_time": {"type": ["string", "null"]},
-                    "all_day": {"type": "boolean"},
-                    "location": {"type": ["string", "null"]},
-                    "reminder_minutes": {"type": ["integer", "null"]},
-                    "repeat_freq": {"type": "string", "enum": list(REPEAT_FREQS)},
-                    "repeat_detail": {"type": "string"},
-                    "temporal_context": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "role": {"type": "string", "enum": list(TEMPORAL_ROLES)},
-                                "label": {"type": "string"},
-                                "raw_text": {"type": "string"},
-                                "date": {"type": ["string", "null"]},
-                                "time": {"type": ["string", "null"]},
-                                "end_date": {"type": ["string", "null"]},
-                                "end_time": {"type": ["string", "null"]},
-                                "precision": {
-                                    "type": "string",
-                                    "enum": list(TEMPORAL_PRECISIONS),
-                                },
-                                "resolution": {
-                                    "type": "string",
-                                    "enum": list(TEMPORAL_RESOLUTIONS),
-                                },
-                                "segment_id": {"type": "string"},
-                            },
-                            "required": [
-                                "role", "label", "raw_text", "date", "time",
-                                "end_date", "end_time", "precision", "resolution",
-                                "segment_id",
-                            ],
-                        },
-                    },
-                    "checklist": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                    },
-                    "evidence": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "segment_id": {"type": "string"},
-                                "field": {"type": "string"},
-                                "quote": {"type": "string"},
-                            },
-                            "required": ["segment_id", "field", "quote"],
-                        },
-                    },
-                    "review_issues": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "code": {"type": "string"},
-                                "field": {"type": "string"},
-                                "message": {"type": "string"},
-                                "blocking": {"type": "boolean"},
-                            },
-                            "required": ["code", "field", "message", "blocking"],
-                        },
-                    },
-                    "group_id": {"type": "string"},
-                    "urgency": {"type": "string", "enum": ["즉시", "보통"]},
-                },
-                "required": [
-                    "scope", "type", "title", "detail", "intent",
-                    "applicability", "condition", "source_state", "at", "due",
-                    "due_time", "all_day", "location", "reminder_minutes", "repeat_freq",
-                    "repeat_detail", "temporal_context", "checklist", "evidence",
-                    "review_issues", "group_id", "urgency",
-                ],
-            },
-        }
-    },
-    "required": ["items"],
-}
 
 REQUIRED_ITEM_FIELDS = (
     "scope",
@@ -266,139 +158,6 @@ def get_api_key() -> str:
     return _api_key()
 
 
-TAXONOMY = """## 1차 분류 (scope)
-- "담임": 최종 대상이 **학생**인 일. 학생들에게 무엇을 전달·안내·배부·지도하라고 하거나,
-  학생에게 전달할 사항이 있는 경우.
-  (예: 가정통신문 배부, 학생들에게 설문 안내, 조회 때 전달, 학생 대상 행사 안내)
-- "업무": 최종 대상이 **나(교사)** 인 일. 선생님에게 무엇을 하라거나 제출하라고 하는 경우.
-  (예: 서류 제출, 연수 이수, 회의·연수 참석, 시트 입력, 신청·회신, 임장·감독)
-- "참조": 읽고 알아두기만 하면 되고 내가 할 행동이 하나도 남지 않는 안내·공지
-
-### 판정 순서
-1. 학생에게 무언가를 전달·지도해야 하는가? → 담임
-2. 내가 직접 하거나 제출·참석해야 하는가? → 업무
-3. 둘 다 아니면 → 참조
-※ 한 메시지에 학생 전달분과 내 제출분이 함께 있으면 항목을 나누어 각각 담임/업무로 넣으세요.
-
-### 참조 판정 주의 (가장 자주 틀림)
-- "학생들에게 안내/배부/지도 부탁드립니다" → 담임. 참조 아님
-- "희망자는 회신 주세요", "신청 바랍니다" → 내가 대상이 될 수 있으면 참조 아님
-- 내가 참석·임장해야 하는 시각이 적혀 있으면 참조 아님
-- **애매하면 참조로 버리지 말고 항목으로 뽑으세요.** 불필요한 항목은 사용자가 지우면 되지만
-  빠뜨린 항목은 사용자가 알아채지 못합니다. 재현율을 정확도보다 우선하세요."""
-
-SEMANTIC_RULES = """## 행동 단위와 날짜의 관계 (가장 중요)
-- 항목 수는 날짜 수·번호 수·문장 수가 아니라 **독립된 사용자 행동 수**로 정합니다.
-  한 항목을 완료해도 별도의 행동이 남는 경우에만 나눕니다.
-- 모집·선착순·희망자·신청·회신 요청은 `apply` 또는 `reply` 1건으로 만들고,
-  모집 대상 행사일은 그 행동의 `event_context`로만 남깁니다. 행사 참석이 확정되었다는
-  문장이 없으면 별도 Calendar를 만들지 않습니다.
-- "반드시", "제출하세요", "기한 내", "참석 바랍니다"처럼 수신자가 해야 한다고
-  명시한 행동은 `applicability=required`입니다. "희망자", "가능한 분", "해당자",
-  "있으시면", "선택"처럼 조건이 붙은 행동만 `conditional`입니다.
-- 모집 공지에 함께 적힌 행사일은 신청 행동의 `event_context`입니다. 행사 참석이
-  확정되었다는 근거가 없으면 별도의 Calendar 항목으로 만들지 않습니다.
-- 행사일과 접수 마감이 함께 있어도 같은 신청 행동에 연결합니다. `당일`, `그날`처럼
-  날짜를 확정할 수 없는 마감은 `due=null`, `due_time`만 보존하고 review_issues에 확인 사유를 남깁니다.
-- `type=calendar`는 사용자가 그 시각에 참석·수행하는 주 행동, `type=todo`는 신청·회신·제출·준비·안내 등
-  그 전까지 처리하는 행동입니다. 관련 날짜만 있는 경우 type을 calendar로 만들지 않습니다.
-- 시계 시각이 없는 날짜·기간·요일·교시·아침/오후만으로 `at`을 만들지 않습니다.
-  Calendar는 원문에 정확한 시각이 있거나, 원문이 종일 행사라고 명시한 경우에만 만듭니다.
-  `4교시`, `오전`, `당일`은 temporal_context에 보존하고 HH:MM으로 추정하지 않습니다.
-- `at`은 주 행동의 execution, `due`와 `due_time`은 주 행동의 deadline입니다.
-  나머지 모든 날짜는 temporal_context에 역할을 붙여 남깁니다:
-  execution / deadline / event_context / external_deadline / constraint / historical.
-- 같은 업무의 세부 입력값은 checklist로 묶습니다. 별도 산출물·별도 담당·별도 완료가 명시될 때만 분리합니다.
-- 완료·전달됨·처리함만 있는 메시지는 `items=[]`로 둡니다. 아직 해야 할 후속 행동이
-  함께 있으면 그 후속 행동만 `pending`으로 만들고, 이미 끝난 행동은 만들지 않습니다.
-- 모든 항목은 제목·대상·시점·조건을 뒷받침하는 짧은 원문 구절을 evidence에 넣습니다.
-  근거가 없거나 필수 정보가 없으면 임의로 채우지 말고 review_issues에 기록합니다.
-
-### 대표 예시
-`토익 시험 감독관 모집 / 일시 2026-08-23 08:30 / 당일 오전 10시까지 접수`
-→ `토익 시험 감독관 신청` 1건, `type=todo`, `intent=apply`, `applicability=conditional`.
-시험일은 event_context, 당일 10시는 unresolved deadline 문맥입니다. `접수 마감 확인`이나 시험 Calendar를 추가하지 않습니다."""
-
-FIELD_RULES = """## 시점 — 라벨을 붙이지 말고 사실만 채우세요
-- type: 주 행동이 실제로 수행되는 시점이면 calendar, 기한 전 처리하는 행동이면 todo
-- at: 그 시각에 참석하거나 바로 그때 하면 되는 주 행동의 일시 "YYYY-MM-DDTHH:MM:SS".
-  시각이 없는 날짜만 있으면 null로 두고 해당 날짜를 temporal_context에 남깁니다.
-- due: 그때까지 끝내야 하는 주 행동의 날짜 "YYYY-MM-DD"
-- due_time: 주 행동의 마감 시각 "HH:MM". 날짜가 불명확해도 시각이 있으면 보존하세요.
-- at과 due가 원문에 함께 나와도 주 행동에 해당하지 않는 날짜는 temporal_context로 옮기고,
-  주 행동의 type에 맞는 기본 필드만 채우세요.
-- 마감이 명시되지 않았으면 due 를 지어내지 말고 null 로 두세요.
-- 기준일시·발송일시는 상대 날짜 계산에만 사용합니다. 원문에 없는 날짜·시각을
-  현재 날짜나 행사 날짜로 추정해 due/at에 넣지 마세요.
-- `all_day=true`는 원문에 종일·하루 행사라고 명시된 Calendar에만 사용합니다.
-  날짜만 있다는 이유로 `all_day=true` 또는 `00:00`을 만들지 마세요.
-
-## 의미 필드
-- intent: apply/reply/attend/submit/prepare/inform/supervise/complete_training/other 중 하나
-- applicability: 항상 해야 하면 required, 희망·조건부이면 conditional, 대상이 불명확하면 unknown
-- condition: 조건부 근거를 짧게. 없으면 null
-- source_state: 아직 해야 하면 pending, 완료 근거면 completed, 행동 없는 공지면 informational, 판단 불가면 unknown
-- review_issues: 날짜·대상·근거가 모호한 이유. `blocking=true`는 사용자가 수정하기 전 등록하지 못하는 경우에만 사용
-- group_id: 같은 독립 행동의 하위 정보가 묶인 입력 내 식별자. 번호별로 무조건 새 ID를 만들지 마세요.
-
-## 반복
-- repeat_freq: 정기적으로 되풀이되는 일이면 daily / weekly / monthly, 1회성이면 none
-- repeat_detail: 반복 조건을 짧게 ("화,목" / "매월 1일"). 반복이 아니면 빈 문자열
-  (예: "매주 화,목요일은 분리수거날입니다" → weekly / "화,목")
-
-## 그 밖의 필드
-- title: 짧은 실행형 제목
-- detail: 처리에 필요한 정보만. 인사말·발신자 소개는 넣지 마세요
-- location: 장소가 있으면 넣고 없으면 null
-- reminder_minutes: 몇 분 전 알림이 필요하다고 적혀 있으면 그 값, 없으면 null
-- urgency: 바로/최대한 빨리 해야 하면 "즉시", 아니면 "보통"
-- 한 메시지에 여러 **독립 행동**이 있으면 각각 별도 항목으로 분리하세요. 날짜·조건·세부값만 다르면 먼저 한 항목으로 묶으세요.
-- JSON의 모든 필드를 빠짐없이 출력하세요. `items`가 비어 있는 경우는 행동이 없을 때만 허용합니다.
-JSON 이외의 설명, Markdown 코드 펜스, 추론 내용을 출력하지 마세요."""
-
-
-def _prompt(
-    text: str,
-    reference_date: str | None = None,
-    sent_at: str | None = None,
-) -> str:
-    if sent_at:
-        base = (
-            f"[메시지 발송일시] {sent_at}\n"
-            "  오늘/내일/다음주 같은 상대 날짜는 이 메시지의 발송일을 기준으로 계산하세요."
-        )
-        if reference_date:
-            base += f"\n[사용자 지정 기준일시] {reference_date}"
-    elif reference_date:
-        base = (
-            f"[기준일시] {reference_date}\n"
-            "  이 시각을 기준으로 오늘/내일/다음주 등을 계산하세요.\n"
-            "  단, 본문이나 제목에 발송일·작성일이 적혀 있으면 그 날짜를 우선하세요."
-        )
-    else:
-        today = datetime.now().astimezone().date().isoformat()
-        base = (
-            f"[기준일시] {today} (오늘. 실제 발송일은 알 수 없습니다)\n"
-            "  본문이나 제목에 발송일·작성일이 적혀 있으면 **그 날짜를 기준일로 삼아**\n"
-            "  오늘/내일/다음주 등을 계산하세요. 그런 표기가 없을 때만 위 날짜를 쓰세요."
-        )
-    return (
-        f"""학교 교직원 메시지에서 '내가 해야 할 일'을 뽑아 분류하세요.
-
-[사용자] 역할: {load_profile()}
-{base}
-
-[메시지]
----
-{text}
----
-
-{TAXONOMY}
-
-{SEMANTIC_RULES}
-
-{FIELD_RULES}"""
-    )
 
 
 def _strip_json_fence(content: str) -> str:
@@ -864,7 +623,11 @@ def _parse_api_response(response: Any, original_text: str) -> ClassificationResu
         data = json.loads(_strip_json_fence(content))
     except (AttributeError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise UpstageAPIError(f"Solar Pro 4 응답 JSON 파싱 실패: {exc}") from exc
-    return _to_classification(data, original_text)
+    try:
+        expanded = expand_compact(data)
+    except ValueError as exc:
+        raise UpstageAPIError(f"Solar Pro 4 JSON 형식 오류: {exc}") from exc
+    return _to_classification(expanded, original_text)
 
 
 def _is_retryable_error(error: Exception) -> bool:
@@ -913,18 +676,18 @@ def classify_with_upstage(
         "messages": [
             {
                 "role": "system",
-                "content": "학교 교직원 메시지를 정해진 스키마로 분류하는 도구입니다.",
+                "content": COMPACT_RULES,
             },
-            {"role": "user", "content": _prompt(text, reference_date, sent_at)},
+            {"role": "user", "content": (
+                f"사용자: {load_profile()}\n"
+                f"기준일: {reference_date or datetime.now().astimezone().date().isoformat()}\n"
+                f"발송일: {sent_at or '미상; 본문 발송일이 있으면 우선'}\n"
+                f"메시지:\n{text}"
+            )},
         ],
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "work_item_extraction",
-                "strict": True,
-                "schema": WORK_ITEM_SCHEMA,
-            },
-        },
+        "response_format": {"type": "json_schema", "json_schema": {
+            "name": "compact_work_items", "strict": False, "schema": COMPACT_SCHEMA,
+        }},
         "reasoning_effort": REASONING_EFFORT,
     }
     last_error: UpstageAPIError | None = None
@@ -936,26 +699,18 @@ def classify_with_upstage(
             timeout=timeout,
             max_retries=0,
         )
-        attempt_args = dict(request_args)
         try:
             try:
-                response = client.chat.completions.create(**attempt_args)
+                response = client.chat.completions.create(**request_args)
             except Exception as exc:
-                message = str(exc)
-                if "response_format" not in message.casefold() and "json_schema" not in message.casefold():
-                    raise UpstageAPIError(f"Upstage API 호출 실패: {message}") from exc
-                # Older OpenAI-compatible gateways may accept JSON object mode
-                # but not the stricter schema wrapper.
-                attempt_args["response_format"] = {"type": "json_object"}
-                try:
-                    response = client.chat.completions.create(**attempt_args)
-                except Exception as fallback_exc:
-                    raise UpstageAPIError(f"Upstage JSON 호출 실패: {fallback_exc}") from fallback_exc
+                raise UpstageAPIError(f"Upstage API 호출 실패: {exc}") from exc
             return _parse_api_response(response, text)
         except UpstageAPIError as exc:
             last_error = exc
             if attempt + 1 >= MAX_API_ATTEMPTS or not _is_retryable_error(exc):
                 raise
             time.sleep(0.25)
+        finally:
+            client.close()
 
     raise last_error or UpstageAPIError("Solar Pro 4 호출에 실패했습니다.")

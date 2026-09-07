@@ -1,0 +1,420 @@
+{
+  "baseline": "eb0f898",
+  "rules_sha256": "d43c289082b29828d213e49820b0623ab826213dc645160a810c1871ed23b7b6",
+  "schema_sha256": "fd6050416e3a8786e9b7ecd0ba934c98d526e330875e2b0eab113e56e82ebb0a",
+  "scope": "synthetic API calls; no queue/UI/Outlook timings",
+  "results": [
+    {
+      "repetition": 1,
+      "case": "deadline",
+      "variant": "compact",
+      "ok": true,
+      "items": 1,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 0,
+      "fields": [
+        {
+          "type": "todo",
+          "intent": "submit",
+          "at": null,
+          "due": "2026-09-10",
+          "due_time": "17:00",
+          "applicability": "required",
+          "context_roles": []
+        }
+      ],
+      "seconds": 8.051,
+      "calls": [
+        {
+          "input_chars": 1633,
+          "format_chars": 1583,
+          "usage": {
+            "completion_tokens": 90,
+            "prompt_tokens": 629,
+            "total_tokens": 719,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 246,
+          "seconds": 7.403
+        }
+      ]
+    },
+    {
+      "repetition": 1,
+      "case": "recruitment",
+      "variant": "compact",
+      "ok": true,
+      "items": 1,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 1,
+      "fields": [
+        {
+          "type": "todo",
+          "intent": "apply",
+          "at": null,
+          "due": null,
+          "due_time": "10:00",
+          "applicability": "conditional",
+          "context_roles": [
+            "event_context",
+            "deadline",
+            "external_deadline",
+            "execution"
+          ]
+        }
+      ],
+      "seconds": 7.27,
+      "calls": [
+        {
+          "input_chars": 1706,
+          "format_chars": 1583,
+          "usage": {
+            "completion_tokens": 294,
+            "prompt_tokens": 674,
+            "total_tokens": 968,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 795,
+          "seconds": 7.004
+        }
+      ]
+    },
+    {
+      "repetition": 1,
+      "case": "multi",
+      "variant": "compact",
+      "ok": true,
+      "items": 3,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 1,
+      "fields": [
+        {
+          "type": "calendar",
+          "intent": "attend",
+          "at": "2026-09-10T15:00:00",
+          "due": null,
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": [
+            "event_context"
+          ]
+        },
+        {
+          "type": "todo",
+          "intent": "submit",
+          "at": null,
+          "due": "2026-09-11",
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": [
+            "deadline"
+          ]
+        },
+        {
+          "type": "calendar",
+          "intent": "supervise",
+          "at": null,
+          "due": null,
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": [
+            "execution"
+          ]
+        }
+      ],
+      "seconds": 6.046,
+      "calls": [
+        {
+          "input_chars": 1679,
+          "format_chars": 1583,
+          "usage": {
+            "completion_tokens": 424,
+            "prompt_tokens": 655,
+            "total_tokens": 1079,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 1301,
+          "seconds": 5.775
+        }
+      ]
+    },
+    {
+      "repetition": 1,
+      "case": "completed",
+      "variant": "compact",
+      "ok": true,
+      "items": 0,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 0,
+      "fields": [],
+      "seconds": 2.02,
+      "calls": [
+        {
+          "input_chars": 1644,
+          "format_chars": 1583,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 627,
+            "total_tokens": 633,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 12,
+          "seconds": 1.749
+        }
+      ]
+    },
+    {
+      "repetition": 2,
+      "case": "deadline",
+      "variant": "compact",
+      "ok": true,
+      "items": 1,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 0,
+      "fields": [
+        {
+          "type": "todo",
+          "intent": "submit",
+          "at": null,
+          "due": "2026-09-10",
+          "due_time": "17:00",
+          "applicability": "required",
+          "context_roles": [
+            "deadline"
+          ]
+        }
+      ],
+      "seconds": 2.569,
+      "calls": [
+        {
+          "input_chars": 1633,
+          "format_chars": 1583,
+          "usage": {
+            "completion_tokens": 157,
+            "prompt_tokens": 629,
+            "total_tokens": 786,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 453,
+          "seconds": 2.297
+        }
+      ]
+    },
+    {
+      "repetition": 2,
+      "case": "recruitment",
+      "variant": "compact",
+      "ok": true,
+      "items": 1,
+      "count_match": true,
+      "semantic_match": false,
+      "blocked": 0,
+      "fields": [
+        {
+          "type": "todo",
+          "intent": "apply",
+          "at": null,
+          "due": "2026-08-23",
+          "due_time": "10:00",
+          "applicability": "conditional",
+          "context_roles": [
+            "event_context",
+            "external_deadline"
+          ]
+        }
+      ],
+      "seconds": 2.418,
+      "calls": [
+        {
+          "input_chars": 1706,
+          "format_chars": 1583,
+          "usage": {
+            "completion_tokens": 205,
+            "prompt_tokens": 674,
+            "total_tokens": 879,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 588,
+          "seconds": 2.151
+        }
+      ]
+    },
+    {
+      "repetition": 2,
+      "case": "multi",
+      "variant": "compact",
+      "ok": true,
+      "items": 3,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 1,
+      "fields": [
+        {
+          "type": "calendar",
+          "intent": "attend",
+          "at": "2026-09-10T15:00:00",
+          "due": null,
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": [
+            "event_context",
+            "execution"
+          ]
+        },
+        {
+          "type": "todo",
+          "intent": "submit",
+          "at": null,
+          "due": "2026-09-11",
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": [
+            "deadline",
+            "execution"
+          ]
+        },
+        {
+          "type": "calendar",
+          "intent": "supervise",
+          "at": null,
+          "due": null,
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": [
+            "execution",
+            "execution"
+          ]
+        }
+      ],
+      "seconds": 7.213,
+      "calls": [
+        {
+          "input_chars": 1679,
+          "format_chars": 1583,
+          "usage": {
+            "completion_tokens": 337,
+            "prompt_tokens": 655,
+            "total_tokens": 992,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 972,
+          "seconds": 6.94
+        }
+      ]
+    },
+    {
+      "repetition": 2,
+      "case": "completed",
+      "variant": "compact",
+      "ok": true,
+      "items": 0,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 0,
+      "fields": [],
+      "seconds": 1.262,
+      "calls": [
+        {
+          "input_chars": 1644,
+          "format_chars": 1583,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 627,
+            "total_tokens": 633,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 12,
+          "seconds": 0.99
+        }
+      ]
+    }
+  ],
+  "summaries": [
+    {
+      "summary": "compact",
+      "n": 8,
+      "success": 8,
+      "mean": 4.606,
+      "median": 4.308,
+      "semantic_pass": 7,
+      "under_5": 4
+    }
+  ]
+}

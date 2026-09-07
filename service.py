@@ -217,7 +217,7 @@ class WorkflowService:
             self._mark_ai_fallback(result.work_items)
         context: dict[str, object] = {
             "schema_version": 2,
-            "prompt_version": "semantic-v3-strict",
+            "prompt_version": "semantic-v4-compact",
             "validation_version": "strict-v1",
             "sent_at": sent_at,
             "reference_date": reference_date,

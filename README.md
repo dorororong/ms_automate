@@ -181,6 +181,12 @@ LLM에게 2차 라벨까지 물었을 때 실측 7%가 자기모순(`todo_with_d
 
 ## 검증 결과와 현재 품질
 
+현재 기본 프롬프트는 `semantic-v4-compact`입니다. API 필수 필드를 22개에서
+12개로 줄였고, 빈 선택 필드·내부 ID·기본값은 앱에서 채웁니다. 관련 날짜는
+역할과 원문만 받으며 기존 날짜·조건·중복 검사를 거친 뒤 검토창에 표시합니다.
+상세 속도 비교는 [LATENCY_REPORT.md](LATENCY_REPORT.md)를 참고하세요.
+아래 32건 수치는 간소화 **이전** 버전의 결과이며 현재 버전의 정확도 점수가 아닙니다.
+
 회귀 fixture인 `test_set_30.xlsx`의 `테스트셋` 시트 본문 32건을 Solar Pro 4에
 발송일과 함께 전달해 확인했습니다. 이 평가는 신규 메시지 전체의 일반화 점수가
 아니라 현재 프롬프트와 의미 필드의 기준선입니다.
@@ -233,6 +239,10 @@ API 키가 있으면 Upstage `solar-pro4`를 OpenAI 호환 endpoint
 기다리며 최대 2회 시도합니다. 모두 실패하면 오프라인 규칙 분석으로 넘어가고,
 확인 창 아래에 그 사실을 표시합니다. 학교 네트워크에서 외부 API가 막혀 있어도
 워크플로우가 멈추지 않습니다.
+
+추론은 `reasoning_effort="none"`이며, 간소화한 JSON Schema와 로컬 형식 검증을
+함께 사용합니다. 기존 긴 프롬프트와 스키마는 매번 전송하지 않습니다.
+5초는 목표 응답시간이며 제한시간이나 보장 시간이 아닙니다.
 
 실제 API 응답시간은 메시지 길이와 서버 상태에 따라 달라집니다.
 분석은 백그라운드 FIFO 대기열에서 실행되므로 입력창은 계속 사용할 수 있지만,
@@ -328,6 +338,9 @@ Microsoft To Do와 동기화될 수 있습니다.
 | `service.py` | 분류 → 중복 검사 → SQLite pending → Outlook 기록 → saved/failed |
 | `classifier.py` | 오프라인 규칙 분류 |
 | `upstage_classifier.py` | Solar Pro 4 구조화 JSON 분류 |
+| `compact_extraction.py` | 간소화 프롬프트·API 스키마·로컬 기본값 복원 |
+| `benchmark_latency.py` | 합성 메시지 API 속도·핵심 의미 비교 (명시 실행 시 API 호출) |
+| `test_compact_extraction.py` | 축약 응답·조건·반복·시간 차단 회귀 검사 |
 | `outlook_adapter.py` | 클래식 Outlook COM 어댑터 |
 | `storage.py`, `models.py` | SQLite 저장소와 WorkItem 모델 |
 | `selftest.py` | Outlook에 쓰지 않는 로컬/연결 검증 스크립트 |

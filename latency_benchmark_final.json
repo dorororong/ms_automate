@@ -1,0 +1,449 @@
+{
+  "baseline": "eb0f898",
+  "rules_sha256": "844408079061ca743d1dd517773b5017d1062f2d6806113ad35d30ace22c8c4e",
+  "schema_sha256": "90aed169dc9a80292a318a86187e68c4440d6685d7642c522c3b838b95d4d6bb",
+  "scope": "synthetic API calls; no queue/UI/Outlook timings",
+  "results": [
+    {
+      "repetition": 1,
+      "case": "deadline",
+      "variant": "compact",
+      "ok": true,
+      "items": 1,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 1,
+      "fields": [
+        {
+          "type": "todo",
+          "intent": "submit",
+          "at": null,
+          "due": "2026-09-10",
+          "due_time": "17:00",
+          "applicability": "required",
+          "context_roles": [
+            "deadline"
+          ]
+        }
+      ],
+      "seconds": 16.826,
+      "calls": [
+        {
+          "input_chars": 1548,
+          "format_chars": 1269,
+          "usage": {
+            "completion_tokens": 151,
+            "prompt_tokens": 601,
+            "total_tokens": 752,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 435,
+          "seconds": 16.203
+        }
+      ]
+    },
+    {
+      "repetition": 1,
+      "case": "recruitment",
+      "variant": "compact",
+      "ok": true,
+      "items": 1,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 1,
+      "fields": [
+        {
+          "type": "todo",
+          "intent": "apply",
+          "at": null,
+          "due": null,
+          "due_time": "10:00",
+          "applicability": "conditional",
+          "context_roles": [
+            "event_context",
+            "deadline",
+            "constraint"
+          ]
+        }
+      ],
+      "seconds": 3.894,
+      "calls": [
+        {
+          "input_chars": 1621,
+          "format_chars": 1269,
+          "usage": {
+            "completion_tokens": 144,
+            "prompt_tokens": 646,
+            "total_tokens": 790,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 380,
+          "seconds": 3.626
+        }
+      ]
+    },
+    {
+      "repetition": 1,
+      "case": "multi",
+      "variant": "compact",
+      "ok": true,
+      "items": 3,
+      "count_match": true,
+      "semantic_match": false,
+      "blocked": 1,
+      "fields": [
+        {
+          "type": "calendar",
+          "intent": "attend",
+          "at": "2026-09-10T15:00:00",
+          "due": null,
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": [
+            "event_context",
+            "deadline"
+          ]
+        },
+        {
+          "type": "todo",
+          "intent": "submit",
+          "at": null,
+          "due": "2026-09-11",
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": []
+        },
+        {
+          "type": "todo",
+          "intent": "supervise",
+          "at": null,
+          "due": null,
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": []
+        }
+      ],
+      "seconds": 3.245,
+      "calls": [
+        {
+          "input_chars": 1594,
+          "format_chars": 1269,
+          "usage": {
+            "completion_tokens": 418,
+            "prompt_tokens": 627,
+            "total_tokens": 1045,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 1149,
+          "seconds": 2.981
+        }
+      ]
+    },
+    {
+      "repetition": 1,
+      "case": "completed",
+      "variant": "compact",
+      "ok": true,
+      "items": 0,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 0,
+      "fields": [],
+      "seconds": 8.68,
+      "calls": [
+        {
+          "input_chars": 1559,
+          "format_chars": 1269,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 599,
+            "total_tokens": 605,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 12,
+          "seconds": 8.413
+        }
+      ]
+    },
+    {
+      "repetition": 2,
+      "case": "deadline",
+      "variant": "compact",
+      "ok": true,
+      "items": 1,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 0,
+      "fields": [
+        {
+          "type": "todo",
+          "intent": "submit",
+          "at": null,
+          "due": "2026-09-10",
+          "due_time": "17:00",
+          "applicability": "required",
+          "context_roles": []
+        }
+      ],
+      "seconds": 6.357,
+      "calls": [
+        {
+          "input_chars": 1548,
+          "format_chars": 1269,
+          "usage": {
+            "completion_tokens": 110,
+            "prompt_tokens": 601,
+            "total_tokens": 711,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 307,
+          "validation_error": "Solar Pro 4 JSON 형식 오류: JSON repeat_freq 값 오류",
+          "seconds": 1.981
+        },
+        {
+          "input_chars": 1548,
+          "format_chars": 1269,
+          "usage": {
+            "completion_tokens": 74,
+            "prompt_tokens": 601,
+            "total_tokens": 675,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 190,
+          "seconds": 3.588
+        }
+      ]
+    },
+    {
+      "repetition": 2,
+      "case": "recruitment",
+      "variant": "compact",
+      "ok": true,
+      "items": 2,
+      "count_match": false,
+      "semantic_match": false,
+      "blocked": 2,
+      "fields": [
+        {
+          "type": "todo",
+          "intent": "apply",
+          "at": null,
+          "due": null,
+          "due_time": "10:00",
+          "applicability": "conditional",
+          "context_roles": [
+            "event_context",
+            "deadline",
+            "constraint"
+          ]
+        },
+        {
+          "type": "calendar",
+          "intent": "attend",
+          "at": "2026-08-23T08:30:00",
+          "due": null,
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": [
+            "event_context"
+          ]
+        }
+      ],
+      "seconds": 9.759,
+      "calls": [
+        {
+          "input_chars": 1621,
+          "format_chars": 1269,
+          "usage": {
+            "completion_tokens": 296,
+            "prompt_tokens": 646,
+            "total_tokens": 942,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 733,
+          "seconds": 9.492
+        }
+      ]
+    },
+    {
+      "repetition": 2,
+      "case": "multi",
+      "variant": "compact",
+      "ok": true,
+      "items": 3,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 1,
+      "fields": [
+        {
+          "type": "calendar",
+          "intent": "attend",
+          "at": "2026-09-10T15:00:00",
+          "due": null,
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": [
+            "execution",
+            "event_context"
+          ]
+        },
+        {
+          "type": "todo",
+          "intent": "submit",
+          "at": null,
+          "due": "2026-09-11",
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": [
+            "execution",
+            "deadline"
+          ]
+        },
+        {
+          "type": "calendar",
+          "intent": "supervise",
+          "at": null,
+          "due": null,
+          "due_time": null,
+          "applicability": "required",
+          "context_roles": [
+            "execution"
+          ]
+        }
+      ],
+      "seconds": 5.353,
+      "calls": [
+        {
+          "input_chars": 1594,
+          "format_chars": 1269,
+          "usage": {
+            "completion_tokens": 481,
+            "prompt_tokens": 627,
+            "total_tokens": 1108,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 1465,
+          "seconds": 5.085
+        }
+      ]
+    },
+    {
+      "repetition": 2,
+      "case": "completed",
+      "variant": "compact",
+      "ok": true,
+      "items": 0,
+      "count_match": true,
+      "semantic_match": true,
+      "blocked": 0,
+      "fields": [],
+      "seconds": 0.745,
+      "calls": [
+        {
+          "input_chars": 1559,
+          "format_chars": 1269,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 599,
+            "total_tokens": 605,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          },
+          "output_chars": 12,
+          "seconds": 0.47
+        }
+      ]
+    }
+  ],
+  "summaries": [
+    {
+      "summary": "compact",
+      "n": 8,
+      "success": 8,
+      "mean": 6.857,
+      "median": 5.855,
+      "semantic_pass": 6,
+      "under_5": 3
+    }
+  ]
+}
