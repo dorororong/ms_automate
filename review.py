@@ -422,7 +422,7 @@ class ReviewWindow(tk.Toplevel):
 
     def _set_all(self, checked: bool) -> None:
         for card in self.cards:
-            if card.item.saved or card.item.excluded_reason or not card.item.can_register:
+            if card.item.saved or card.item.excluded_reason or not card.can_register_now():
                 card.selected_var.set(False)
             elif card.scope_var.get().strip() == SCOPE_REFERENCE:
                 card.selected_var.set(False)
@@ -517,11 +517,12 @@ class ReviewWindow(tk.Toplevel):
             1
             for card in self.cards
             if card.selected_var.get()
-            and card.item.can_register
+            and card.can_register_now()
             and not card.item.saved
             and not card.item.excluded_reason
         )
         self.save_button.configure(text=f"{count}건 등록" if count else "등록")
+        self.save_button.configure(state="normal" if count else "disabled")
 
     def set_queue_status(self, count: int) -> None:
         """Show pending analyses without adding another panel to the UI."""

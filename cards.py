@@ -73,6 +73,7 @@ class WorkItemCard:
         self.repeat_freq_var = tk.StringVar(value=item.repeat_freq)
         self.repeat_detail_var = tk.StringVar(value=item.repeat_detail)
         self.compact_meta_var = tk.StringVar(value="")
+        self.quick_kind_var = tk.StringVar(value="일시")
         self._details_visible = False
         self.selected_var.trace_add("write", lambda *_args: self._notify_change())
 
@@ -84,27 +85,40 @@ class WorkItemCard:
         top.columnconfigure(1, weight=1)
         self.select_button = theme.checkbox(top, "등록", self.selected_var)
         self.select_button.grid(row=0, column=0, padx=(0, 8))
-        self.title_label = ttk.Label(
-            top, textvariable=self.title_var, style="CardHead.TLabel", anchor="w"
+        # 제목은 가장 자주 고치는 값이라 상세 편집을 열지 않아도 바로 수정한다.
+        self.quick_title_entry = ttk.Entry(
+            top, textvariable=self.title_var, font=theme.F_HEAD,
         )
-        self.title_label.grid(row=0, column=1, sticky="ew")
-        self.toggle_button = ttk.Button(top, text="수정", width=7, command=self._toggle_details)
+        self.quick_title_entry.grid(row=0, column=1, sticky="ew")
+        self.quick_title_entry.bind("<KeyRelease>", self._refresh)
+        self.toggle_button = ttk.Button(top, text="상세", width=7, command=self._toggle_details)
         self.toggle_button.grid(row=0, column=2, padx=(8, 0))
 
         meta = ttk.Frame(body, style="Card.TFrame")
         meta.grid(row=1, column=0, sticky="ew", pady=(5, 0))
-        meta.columnconfigure(1, weight=1)
+        meta.columnconfigure(2, weight=1)
         self.badge = tk.Label(meta, text="", font=theme.F_SMALL, padx=7, pady=1)
         self.badge.grid(row=0, column=0, sticky="w")
         ttk.Label(
-            meta, textvariable=self.compact_meta_var, style="CardMuted.TLabel", anchor="w"
-        ).grid(row=0, column=1, sticky="ew", padx=(8, 0))
+            meta, textvariable=self.quick_kind_var, style="CardMuted.TLabel",
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        self.quick_date_entry = ttk.Entry(meta, width=17)
+        self.quick_date_entry.grid(row=0, column=2, sticky="ew", padx=(5, 0))
+        self.quick_date_entry.bind("<KeyRelease>", self._refresh)
+        self.quick_time_label = ttk.Label(meta, text="시각", style="CardMuted.TLabel")
+        self.quick_time_label.grid(row=0, column=3, sticky="w", padx=(6, 0))
+        self.quick_time_entry = ttk.Entry(meta, textvariable=self.due_time_var, width=7)
+        self.quick_time_entry.grid(row=0, column=4, sticky="w", padx=(4, 0))
+        self.quick_time_entry.bind("<KeyRelease>", self._refresh)
+        ttk.Label(
+            body, textvariable=self.compact_meta_var, style="CardMuted.TLabel", anchor="w"
+        ).grid(row=2, column=0, sticky="ew", pady=(4, 0))
         self.state_label = ttk.Label(meta, text="", style="CardMuted.TLabel", anchor="e")
-        self.state_label.grid(row=0, column=2, sticky="e", padx=(8, 0))
+        self.state_label.grid(row=0, column=5, sticky="e", padx=(8, 0))
 
         # --- 필요할 때만 여는 상세 편집 -------------------------------
         self.details = ttk.Frame(body, style="Card.TFrame", padding=(0, 8, 0, 0))
-        self.details.grid(row=2, column=0, sticky="ew")
+        self.details.grid(row=3, column=0, sticky="ew")
         self.details.columnconfigure(1, weight=1)
 
         ttk.Label(self.details, text="제목", style="Card.TLabel", width=5).grid(
@@ -228,7 +242,21 @@ class WorkItemCard:
             self.title_entry.focus_set()
         else:
             self.details.grid_remove()
-            self.toggle_button.configure(text="수정")
+            self.toggle_button.configure(text="상세")
+
+    def _set_quick_fields(self, preview: WorkItem) -> None:
+        """Keep the two most useful fields visible without duplicating state."""
+
+        if preview.action == ACTION_WITH_DATE:
+            self.quick_kind_var.set("일시")
+            self.quick_date_entry.configure(textvariable=self.at_var)
+            self.quick_time_label.grid_remove()
+            self.quick_time_entry.grid_remove()
+        else:
+            self.quick_kind_var.set("마감")
+            self.quick_date_entry.configure(textvariable=self.due_var)
+            self.quick_time_label.grid()
+            self.quick_time_entry.grid()
 
     # --- 파생 라벨 ------------------------------------------------------
 
@@ -271,6 +299,7 @@ class WorkItemCard:
             due_time=self.due_time_var.get().strip() or None,
         )
         label, hint = ACTION_BADGE[preview.action]
+        self._set_quick_fields(preview)
         accent = theme.SCOPE_COLORS.get(scope, theme.MUTED)
         self.badge.configure(text=label, bg=accent, fg="#ffffff")
         self.badge_hint.configure(text=hint)
@@ -312,6 +341,7 @@ class WorkItemCard:
         else:
             self.select_button.configure(state="normal")
             self.state_label.configure(text="등록 대기", foreground=theme.MUTED)
+        self._notify_change()
 
     def _compact_summary(self, preview: WorkItem) -> str:
         parts: list[str] = []
@@ -408,6 +438,14 @@ class WorkItemCard:
         else:
             item.type = item.outlook_target or "todo"
         return item
+
+    def can_register_now(self) -> bool:
+        """Evaluate the edited values, not only the original AI draft."""
+
+        try:
+            return self.to_work_item().can_register
+        except ValueError:
+            return False
 
     def _parse_reminder_minutes(self) -> int | None:
         value = self.reminder_var.get().strip()
