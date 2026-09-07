@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/*.sqlite3
+data/*.db
+.env
+# 실제 메시지 원문이 포함된 로컬 회귀 fixture
+test_set_30.xlsx
+# 사용자별 학교/업무 프로필은 로컬 전용
+profile.json

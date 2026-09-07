@@ -1,0 +1,7 @@
+pywin32>=306
+openai>=1.52.2,<2
+tkinterdnd2>=0.3.0
+pdfplumber>=0.10.0
+Pillow>=10.0.0
+olefile>=0.46
+pytesseract>=0.3.10
