@@ -1,5 +1,12 @@
 # 학교 업무 메시지 → Outlook 일정·할 일
 
+> ### 🐈 [CATMOA](https://github.com/progh2/catmoa) 기반
+>
+> - 교사 개발자 해커톤 결과물인 **CATMOA**에 공동 참여
+> - 메시지 → 일정 추출 → 캘린더 등록 흐름과 작은 창 UX를 CATMOA에서 차용
+> - 학교 환경의 **Google API 사용 제한** 때문에 Outlook 버전으로 재개발
+> - 자세한 내용: [배경](#배경)
+
 학교 공지·메일·메신저 메시지에서 일정과 할 일을 뽑아 클래식 Outlook에 등록하는
 Windows 데스크톱 앱.
 
@@ -35,7 +42,7 @@ SQLite saved + EntryID 기록
 | [WORK_TREE.md](WORK_TREE.md) | 진행 상태, 다음 작업 |
 
 - 저장소: [dorororong/ms_automate](https://github.com/dorororong/ms_automate) (비공개)
-- 참고 원본: [progh2/catmoa](https://github.com/progh2/catmoa)
+- 기반이 된 원본: [progh2/catmoa](https://github.com/progh2/catmoa) — 변경 가하지 않음
 
 ---
 
