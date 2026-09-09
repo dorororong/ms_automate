@@ -41,7 +41,7 @@ COM으로 훑어야 해서, 중복 검사가 읽을 로컬 미러(`outlook_mirro
 ## 2. 실행 흐름 트리
 
 ```text
-app.py (MiniWindow · 오른쪽 아래 350x160 · 항상 위 · 상태 표시 전용)
+app.py (MiniWindow · 오른쪽 아래 180x128 · 항상 위 · 장식 없음 · 상태 전용)
 ├── 입력 (창에는 입력 위젯이 없다)
 │   ├── Ctrl+Shift+X 선택 텍스트        → hotkey.py + selection.py
 │   ├── Ctrl+V 클립보드                 → app.paste_from_clipboard
@@ -166,6 +166,8 @@ compact_extraction.py 리프. 프롬프트 규칙 + API 스키마 + 축약 응�
     [x] 10.9 짧은 상태 + 자세한 설명은 `⋯` 메뉴       app._refresh_status
     [x] 10.10 트레이 툴팁은 이름만                    app._sync_tray_tooltip
     [x] 10.11 앱 아이콘 (창·작업 표시줄·트레이)        icons.py, tray_icon.png
+    [x] 10.12 제목 표시줄 제거 · 헤더 드래그            app._apply_chrome, _on_drag
+    [x] 10.13 동기화 줄은 `⋯` 메뉴로만                 app._show_more_menu
 
 [x] 6. 저장·기록
     [x] 6.1 pending → saved/failed 상태 기록       storage.py, service.py

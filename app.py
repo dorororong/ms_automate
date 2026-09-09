@@ -43,8 +43,8 @@ except ImportError:  # Native WM_DROPFILES still covers file drops.
 HOTKEY_LABEL = "Ctrl+Shift+X"
 VK_X = 0x58
 TASKBAR_MARGIN = 72
-WINDOW_WIDTH = 120
-WINDOW_HEIGHT = 160
+WINDOW_WIDTH = 180
+WINDOW_HEIGHT = 128
 
 FACE = {
     "idle": "(=^ω^=)",
@@ -75,6 +75,7 @@ class MiniWindow(_TK_ROOT):
         self._dnd_enabled = False
         self._paused = False
         self.tray: TrayIcon | None = None
+        self._drag_origin: tuple[int, int] | None = None
 
         self._events: queue.Queue[tuple[str, object]] = queue.Queue()
         self._analysis_jobs: queue.Queue[AnalysisRequest | None] = queue.Queue()
@@ -101,7 +102,6 @@ class MiniWindow(_TK_ROOT):
 
         self.status_var = tk.StringVar(value="대기 중")
         self.detail_var = tk.StringVar(value=f"파일을 놓아 주세요 · {HOTKEY_LABEL}")
-        self.mirror_var = tk.StringVar(value="동기화 준비 중")
         self.mirror_detail = "Outlook 동기화를 준비하고 있습니다."
         self._build_ui()
         # 입력창을 없앤 뒤에도 붙여넣기 경로는 남긴다.
@@ -110,6 +110,7 @@ class MiniWindow(_TK_ROOT):
         self.after_idle(self._install_file_drop)
         self._start_hotkey()
         self._start_tray()
+        self._apply_chrome()
         # 중복 검사가 COM 대신 읽을 로컬 미러를 백그라운드에서 채운다.
         self.service.mirror.start(self._on_mirror_event)
         self.after(100, self._drain_events)
@@ -128,26 +129,34 @@ class MiniWindow(_TK_ROOT):
         일어나고 있는지만 남깁니다. 버튼과 입력창을 걷어낸 자리에 상태를 크게 둡니다.
         """
 
-        head = ttk.Frame(self, padding=(8, 6, 6, 4))
+        # 제목 표시줄이 없으면 창 경계가 배경에 묻힌다. 1px 테두리를 두른다.
+        self.configure(bg=theme.BORDER)
+        shell = tk.Frame(self, bg=theme.BG)
+        shell.pack(fill="both", expand=True, padx=1, pady=1)
+
+        head = ttk.Frame(shell, padding=(8, 5, 5, 3))
         head.pack(fill="x")
         head.columnconfigure(0, weight=1)
-        ttk.Label(head, text="업무 정리", style="Head.TLabel").grid(
-            row=0, column=0, sticky="w"
-        )
+        title = ttk.Label(head, text="업무 정리", style="Head.TLabel")
+        title.grid(row=0, column=0, sticky="w")
         self.more_button = ttk.Button(
             head, text="⋯", width=2, command=self._show_more_menu,
         )
         self.more_button.grid(row=0, column=1, sticky="e")
+        # 제목 표시줄을 없애면 창을 옮길 곳이 없다. 헤더를 손잡이로 쓴다.
+        for widget in (head, title):
+            widget.bind("<Button-1>", self._start_drag)
+            widget.bind("<B1-Motion>", self._on_drag)
 
         # 창 전체가 드롭 구역이자 상태 표시판이다.
         self.drop_zone = tk.Frame(
-            self,
+            shell,
             bg=theme.ACCENT_SOFT,
             highlightbackground=theme.BORDER,
             highlightthickness=1,
             cursor="hand2",
         )
-        self.drop_zone.pack(fill="both", expand=True, padx=8, pady=(0, 4))
+        self.drop_zone.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.drop_zone.pack_propagate(False)
         self.drop_zone.columnconfigure(0, weight=1)
         self.drop_zone.rowconfigure(0, weight=1)
@@ -176,15 +185,6 @@ class MiniWindow(_TK_ROOT):
             widget.bind("<Enter>", self._drop_hover)
             widget.bind("<Leave>", self._drop_leave)
 
-        bottom = ttk.Frame(self, padding=(8, 0, 8, 5))
-        bottom.pack(fill="x")
-        bottom.columnconfigure(0, weight=1)
-        ttk.Label(
-            bottom,
-            textvariable=self.mirror_var,
-            style="Muted.TLabel",
-            anchor="w",
-        ).grid(row=0, column=0, sticky="ew")
 
     # --- drop/input ---------------------------------------------------
 
@@ -263,6 +263,33 @@ class MiniWindow(_TK_ROOT):
             return
         self.tray.set_tooltip("업무 정리")
 
+    def _apply_chrome(self) -> None:
+        """트레이가 있으면 제목 표시줄과 최소화·닫기 버튼을 없앤다.
+
+        트레이 아이콘을 만들지 못했으면 창이 유일한 조작 수단이므로 제목
+        표시줄을 남깁니다. 그러지 않으면 앱을 끌 방법이 사라집니다.
+        """
+
+        if self.tray is None:
+            return
+        try:
+            self.overrideredirect(True)
+            # 장식을 없애면 topmost 가 풀리는 환경이 있어 다시 건다.
+            self.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+
+    def _start_drag(self, event: tk.Event) -> None:
+        self._drag_origin = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+    def _on_drag(self, event: tk.Event) -> None:
+        if self._drag_origin is None:
+            return
+        self.geometry(
+            f"+{event.x_root - self._drag_origin[0]}"
+            f"+{event.y_root - self._drag_origin[1]}"
+        )
+
     def _on_close_button(self) -> None:
         """X 는 트레이로 내리고, 종료는 트레이나 `⋯` 메뉴에서 한다.
 
@@ -304,14 +331,12 @@ class MiniWindow(_TK_ROOT):
         )
 
     def _on_mirror_synced(self, payload: object) -> None:
-        self.mirror_var.set(f"동기화 {payload}")
         self.mirror_detail = f"Outlook {payload}건 동기화됨"
         if self._is_idle():
             self._refresh_status()
 
     def _on_mirror_error(self, error: str) -> None:
         # 동기화 실패는 아래 줄에만 남긴다. 큰 상태는 사용자가 할 일을 가리켜야 한다.
-        self.mirror_var.set("동기화 실패")
         self.mirror_detail = f"Outlook 동기화 실패 · 등록 시 직접 확인 ({error[:40]})"
         if self._is_idle():
             self._refresh_status()
