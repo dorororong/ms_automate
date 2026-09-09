@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 from typing import Callable
 
@@ -63,6 +64,8 @@ class WorkItemCard:
         self.dismissed = False
         self._title_fit_pending = False
         self._fitting_title = False
+        self._meta_full = ""
+        self._meta_font: tkfont.Font | None = None
         accent = theme.SCOPE_COLORS.get(item.scope, theme.MUTED)
         self.frame, body = theme.card(parent, accent)
         self.strip = self.frame.winfo_children()[0]
@@ -88,7 +91,10 @@ class WorkItemCard:
         self._details_visible = False
         self.selected_var.trace_add("write", lambda *_args: self._notify_change())
 
+        # theme.card 는 column 1 에 weight 를 주지만 카드 내용은 전부 column 0 에
+        # 있다. 그대로 두면 남는 폭이 둘로 갈려 카드마다 버튼 가로 위치가 달라진다.
         body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=0)
 
         # --- 항상 보이는 요약 ------------------------------------------
         # 요약 제목은 길면 한 줄에 안 들어간다. 카드 전체 폭을 쓰고 줄바꿈해서
@@ -138,10 +144,17 @@ class WorkItemCard:
         actions = ttk.Frame(body, style="Card.TFrame")
         actions.grid(row=2, column=0, sticky="ew", pady=(6, 0))
         actions.columnconfigure(0, weight=1)
+        # width=1 이어야 요약 문구 길이가 버튼 위치를 밀지 않는다. 이걸 빼면
+        # 카드마다 문구 길이가 달라 버튼 가로 위치가 제각각이 된다.
         self.compact_meta_label = ttk.Label(
-            actions, textvariable=self.compact_meta_var, style="CardMuted.TLabel", anchor="w"
+            actions,
+            textvariable=self.compact_meta_var,
+            style="CardMuted.TLabel",
+            anchor="w",
+            width=1,
         )
         self.compact_meta_label.grid(row=0, column=0, sticky="ew")
+        self.compact_meta_label.bind("<Configure>", lambda _e: self._render_meta())
         self.toggle_button = ttk.Button(
             actions, text="상세", width=5, command=self._toggle_details
         )
@@ -449,10 +462,10 @@ class WorkItemCard:
         self.badge.configure(text=label, bg=accent, fg="#ffffff")
         self.badge_hint.configure(text=hint)
         self.strip.configure(bg=accent)
-        summary = self._compact_summary(preview)
-        self.compact_meta_var.set(summary)
+        self._meta_full = self._compact_summary(preview)
+        self._render_meta()
         # 위 입력란이 이미 말한 것을 한 줄 더 쓰지 않는다.
-        if summary:
+        if self._meta_full:
             self.compact_meta_label.grid()
         else:
             self.compact_meta_label.grid_remove()
@@ -524,6 +537,33 @@ class WorkItemCard:
         if self.location_var.get().strip():
             parts.append(self.location_var.get().strip())
         return " · ".join(parts)
+
+    def _render_meta(self) -> None:
+        """요약 문구를 남은 폭에 맞춰 자르고 말줄임표를 붙인다.
+
+        버튼 위치를 고정하려고 라벨 폭을 1로 두었기 때문에, 긴 문구는 그냥
+        두면 글자 중간에서 뚝 잘려 고장난 것처럼 보인다.
+        """
+
+        try:
+            available = self.compact_meta_label.winfo_width()
+        except tk.TclError:
+            return
+        text = self._meta_full
+        if not text or available <= 1:
+            self.compact_meta_var.set(text)
+            return
+        if self._meta_font is None:
+            self._meta_font = tkfont.Font(font=theme.F_SMALL)
+        if self._meta_font.measure(text) <= available:
+            self.compact_meta_var.set(text)
+            return
+        ellipsis = "…"
+        room = available - self._meta_font.measure(ellipsis)
+        cut = len(text)
+        while cut > 0 and self._meta_font.measure(text[:cut]) > room:
+            cut -= 1
+        self.compact_meta_var.set(text[:cut].rstrip() + ellipsis if cut else ellipsis)
 
     def _current_signature(self) -> tuple[str, ...]:
         return (

@@ -153,6 +153,8 @@ compact_extraction.py 리프. 프롬프트 규칙 + API 스키마 + 축약 응�
     [x] 5.11 검토창을 작은 창과 겹치지 않게 배치      review._placement
     [x] 5.12 긴 제목 줄바꿈 · 끝까지 보이기           cards._fit_title_height
     [x] 5.13 등록/미등록 오클릭 방지 간격             cards.py actions
+    [x] 5.14 카드마다 버튼 가로 위치 통일               cards.py body/actions 폭
+    [x] 5.15 요약 문구 말줄임 처리                      cards._render_meta
 
 [x] 10. 작은 창과 트레이
     [x] 10.1 입력창·실행 버튼 제거, 상태 한 줄만      app._build_ui
@@ -168,6 +170,7 @@ compact_extraction.py 리프. 프롬프트 규칙 + API 스키마 + 축약 응�
     [x] 10.11 앱 아이콘 (창·작업 표시줄·트레이)        icons.py, tray_icon.png
     [x] 10.12 제목 표시줄 제거 · 헤더 드래그            app._apply_chrome, _on_drag
     [x] 10.13 동기화 줄은 `⋯` 메뉴로만                 app._show_more_menu
+    [x] 10.14 작업 표시줄 바로 위에 붙이기              app._work_area
 
 [x] 6. 저장·기록
     [x] 6.1 pending → saved/failed 상태 기록       storage.py, service.py

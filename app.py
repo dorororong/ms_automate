@@ -11,6 +11,8 @@ exposed in this registration flow.
 from __future__ import annotations
 
 from collections import deque
+import ctypes
+from ctypes import wintypes
 from dataclasses import dataclass
 from tkinter import filedialog, messagebox
 import queue
@@ -42,7 +44,8 @@ except ImportError:  # Native WM_DROPFILES still covers file drops.
 
 HOTKEY_LABEL = "Ctrl+Shift+X"
 VK_X = 0x58
-TASKBAR_MARGIN = 72
+SPI_GETWORKAREA = 0x0030
+EDGE_MARGIN = 16
 WINDOW_WIDTH = 180
 WINDOW_HEIGHT = 128
 
@@ -117,9 +120,25 @@ class MiniWindow(_TK_ROOT):
 
     # --- layout -------------------------------------------------------
 
+    def _work_area(self) -> tuple[int, int, int, int]:
+        """작업 표시줄을 뺀 화면 영역. 못 읽으면 화면 전체를 쓴다."""
+
+        try:
+            rect = wintypes.RECT()
+            if ctypes.windll.user32.SystemParametersInfoW(
+                SPI_GETWORKAREA, 0, ctypes.byref(rect), 0
+            ):
+                return rect.left, rect.top, rect.right, rect.bottom
+        except (AttributeError, OSError):
+            pass
+        return 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
+
     def _corner_geometry(self) -> str:
-        x = max(self.winfo_screenwidth() - WINDOW_WIDTH - 16, 0)
-        y = max(self.winfo_screenheight() - WINDOW_HEIGHT - TASKBAR_MARGIN, 0)
+        """작업 표시줄 바로 위, 오른쪽 끝에 붙인다."""
+
+        left, top, right, bottom = self._work_area()
+        x = max(right - WINDOW_WIDTH - EDGE_MARGIN, left)
+        y = max(bottom - WINDOW_HEIGHT, top)
         return f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{x}+{y}"
 
     def _build_ui(self) -> None:
