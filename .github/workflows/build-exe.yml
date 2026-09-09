@@ -1,0 +1,62 @@
+name: build-exe
+
+# 태그를 밀거나 Actions 탭에서 직접 돌리면 Windows 실행 파일을 만든다.
+#   git tag v0.1.0 && git push origin v0.1.0
+# 태그로 돌린 경우 릴리스에 exe 를 첨부하므로 받아서 바로 쓸 수 있다.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-build.txt
+
+      - name: 로컬 검증
+        # Outlook 도 API 키도 없는 러너에서 도는 검사만 고른다.
+        # selftest 는 전역 단축키·Outlook 연결을 확인하므로 여기서는 제외한다.
+        run: |
+          python -m compileall -q .
+          python -m unittest test_compact_extraction -v
+
+      - name: exe 빌드
+        run: python -m PyInstaller ms_automate.spec --noconfirm
+
+      - name: 번들 내용 검사
+        run: python check_bundle.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ms-automate-exe
+          path: dist/*.exe
+          if-no-files-found: error
+
+      - name: 릴리스에 첨부
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          body: |
+            Windows 실행 파일입니다. 받아서 바로 실행하세요.
+
+            - 클래식 Outlook 이 설치·로그인된 Windows 에서 동작합니다.
+            - exe 를 둔 폴더에 `data/` 가 생기고, 같은 폴더의 `.env` 와
+              `profile.json` 을 읽습니다.
+            - Solar Pro 4 분석을 쓰려면 `.env` 에 `UPSTAGE_API=up_...` 를 넣으세요.
+              키가 없으면 오프라인 규칙 분석으로 동작합니다.

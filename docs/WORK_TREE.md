@@ -23,6 +23,7 @@
 | (미커밋) | 09-09 | 상태만 남긴 작은 창 · 트레이 아이콘 | `tray.py`, 입력창·실행 버튼 제거, 항상 위, 일시중지 |
 | (미커밋) | 09-09 | 마감일 캘린더 표시 · 카드 가독성 · 창 폭 축소 | `outlook_mirror` 표시 행, 제목 줄바꿈, 등록/미등록 간격, `120×160` |
 | (미커밋) | 09-09 | 앱 아이콘 · README 재작성 | `icons.py`, 파이썬 기본 아이콘 교체, README 전면 정리 |
+| (미커밋) | 09-10 | 저장소 정리 · exe 배포 | `docs/`·`assets/`·`docs/benchmarks/` 분리, `paths.py`, `ms_automate.spec`, `check_bundle.py`, GitHub Actions |
 
 흐름 요약: **파이프라인 구축 → 잘못된 등록 차단 → API 지연 절감 → 검토 UI 손질 →
 검토 조작 자체를 없애기**. 기능은 한 번에 만들어졌고, 이후 작업은 모두
@@ -68,7 +69,21 @@ app.py (MiniWindow · 오른쪽 아래 180x128 · 항상 위 · 장식 없음 ·
     └── outlook_mirror.write_through → 다음 카드의 중복 검사에 즉시 반영
 ```
 
-## 3. 모듈 의존 트리
+## 3. 저장소 구조
+
+```text
+README.md                사용 설명
+app.py 외 *.py           실행 모듈 (평면 구조)
+ms_automate.spec         PyInstaller 빌드 정의
+assets/tray_icon.png     앱 아이콘 원본
+data/                    로컬 SQLite (Git 제외)
+docs/                    구현 리포트 · 속도 리포트 · 추출 명세 · 작업 트리
+docs/benchmarks/         속도 실험 결과 JSON (실험 순서대로 번호)
+.github/workflows/       태그를 밀면 exe 를 빌드해 릴리스에 첨부
+build/, dist/            빌드 산출물 (Git 제외)
+```
+
+## 4. 모듈 의존 트리
 
 ```text
 app.py
@@ -97,7 +112,7 @@ compact_extraction.py 리프. 프롬프트 규칙 + API 스키마 + 축약 응�
 ├── selftest.py                  --offline 32/32, API 포함 30/30
 ├── test_compact_extraction.py   축약 계약 회귀 7/7
 ├── test_review_flow.py          검토창 Tk 위젯 회귀 8/8
-└── benchmark_latency.py         API 호출 실측 → latency_benchmark*.json
+└── benchmark_latency.py         API 호출 실측 → docs/benchmarks/*.json
 ```
 
 의존 방향이 단방향(UI → service → 분류/저장/COM → models)이라
@@ -105,7 +120,7 @@ compact_extraction.py 리프. 프롬프트 규칙 + API 스키마 + 축약 응�
 
 ---
 
-## 4. 기능별 작업 트리
+## 5. 기능별 작업 트리
 
 ```text
 [x] 1. 입력 수집
@@ -167,10 +182,19 @@ compact_extraction.py 리프. 프롬프트 규칙 + API 스키마 + 축약 응�
     [x] 10.8 가로 폭 1/3 (350 → 120)                 app.WINDOW_WIDTH
     [x] 10.9 짧은 상태 + 자세한 설명은 `⋯` 메뉴       app._refresh_status
     [x] 10.10 트레이 툴팁은 이름만                    app._sync_tray_tooltip
-    [x] 10.11 앱 아이콘 (창·작업 표시줄·트레이)        icons.py, tray_icon.png
+    [x] 10.11 앱 아이콘 (창·작업 표시줄·트레이)        icons.py, assets/tray_icon.png
     [x] 10.12 제목 표시줄 제거 · 헤더 드래그            app._apply_chrome, _on_drag
     [x] 10.13 동기화 줄은 `⋯` 메뉴로만                 app._show_more_menu
     [x] 10.14 작업 표시줄 바로 위에 붙이기              app._work_area
+
+[x] 11. 배포
+    [x] 11.1 저장소 구조 정리 (docs/assets/benchmarks)  루트 파일 36 → 24
+    [x] 11.2 소스/exe 경로 분리                        paths.py
+    [x] 11.3 PyInstaller onefile 빌드                  ms_automate.spec
+    [x] 11.4 번들 누락 검사                            check_bundle.py
+    [x] 11.5 태그 푸시 시 exe 자동 빌드·릴리스 첨부      .github/workflows
+    [~] 11.6 exe 크기                                  51MB. openai 887항목이 최대
+    [ ] 11.7 코드 서명                                 미적용. SmartScreen 경고 발생
 
 [x] 6. 저장·기록
     [x] 6.1 pending → saved/failed 상태 기록       storage.py, service.py
@@ -208,7 +232,7 @@ compact_extraction.py 리프. 프롬프트 규칙 + API 스키마 + 축약 응�
 
 ---
 
-## 5. 다음 작업 후보
+## 6. 다음 작업 후보
 
 우선순위는 "현재 릴리즈 판정 = 검토형 베타"를 올리는 데 필요한 순서입니다.
 
@@ -233,12 +257,7 @@ compact_extraction.py 리프. 프롬프트 규칙 + API 스키마 + 축약 응�
 - **완료 기준**: 첫 응답까지의 대기와 전체 생성 시간을 나눠 측정한 뒤,
   5초를 목표로 유지할지 목표치를 조정할지 문서에 명시한다.
 
-### P4 — 벤치마크 산출물 정리
-- **왜**: `latency_benchmark.json` / `_final.json` / `_v4.json` 세 개가 루트에 있고,
-  `_final`은 최종 제품 버전이 아니라 중간 10필드 실험이라 파일명이 오해를 부릅니다.
-- **완료 기준**: 결과 폴더로 옮기거나 실험 순서대로 이름을 바꾼다.
-
-### P5 — 미러 동기화 비용 줄이기
+### P4 — 미러 동기화 비용 줄이기
 - **왜**: 지금은 5분마다 Calendar/작업 폴더 전체를 다시 읽습니다. 이 PC 프로필(13건)은
   1.4초였지만 항목이 수천 건인 프로필에서는 주기마다 비용이 커집니다.
 - **관련**: `outlook_mirror.py`(`sync_once`), `outlook_adapter.read_entries`
@@ -246,14 +265,14 @@ compact_extraction.py 리프. 프롬프트 규칙 + API 스키마 + 축약 응�
   삭제 반영을 위한 전체 재조회는 더 긴 주기로 분리한다. 큰 프로필에서 주기당
   소요 시간을 실측해 기록한다.
 
-### P6 — 보류 가지 (착수 전 범위 결정 필요)
+### P5 — 보류 가지 (착수 전 범위 결정 필요)
 - 기존 Outlook 항목 조회·수정·삭제 UI. 모듈(`command_view.py`, `outlook_command.py`,
   `outlook_view.py`)은 `<project-parent>/_archive/ms_automate_unused_20260907` 에 보관 중.
 - PII 탐지·마스킹, 쿨메신저 UDB 자동 탐색.
 
 ---
 
-## 6. 검증 명령
+## 7. 검증 명령
 
 오프라인 자가 점검 (Outlook 미러 포함):
 
@@ -287,15 +306,16 @@ python benchmark_latency.py --repeats 2 --baseline eb0f898
 
 `selftest.py`는 Outlook에 실제 항목을 쓰지 않습니다.
 
-## 7. 문서 지도
+## 8. 문서 지도
 
 | 문서 | 쓰임 |
 |---|---|
-| `README.md` | 사용자용. 설치·조작·분류 체계·JSON 형식·SQLite 스키마 |
+| `../README.md` | 사용자용. 설치·조작·분류 체계·JSON 형식·SQLite 스키마 |
 | `IMPLEMENTATION_REPORT.md` | 구현 근거. 파이프라인·중복 규칙·32건 평가·제한사항 |
 | `LATENCY_REPORT.md` | 축약 프롬프트 설계와 속도 실측 (2026-09-08) |
 | `ACTION_EXTRACTION_SPEC.md` | 행동 단위 추출 규칙 명세 |
 | `WORK_TREE.md` | 이 문서. 진행 상태와 다음 작업 |
+| `benchmarks/*.json` | 속도 실험 원자료 (실험 순서대로 번호) |
 
 문서를 고칠 때 이 파일의 상태 표기도 같이 옮기세요. 특히 P1이 끝나면
-4장의 `2.5`·`8.6`과 1장의 "기준선" 문장이 함께 바뀝니다.
+5장의 `2.5`·`8.6`과 1장의 "기준선" 문장이 함께 바뀝니다.

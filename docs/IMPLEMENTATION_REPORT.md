@@ -257,7 +257,7 @@ saved   → deleted   # 별도 관리 파이프라인에서 삭제된 경우
 | `service.py` | 의미 필드 검증, 기본 선택 정책, 중복 검사, SQLite 기록, Outlook 등록 조정 |
 | `outlook_mirror.py` | Outlook 프로필의 로컬 사본, 백그라운드 동기화 스레드, write-through |
 | `tray.py` | 알림 영역 아이콘. 창과 무관하게 일시중지·종료 |
-| `icons.py` | `tray_icon.png` → `.ico` 변환, 창·작업 표시줄 아이콘 |
+| `icons.py` | `assets/tray_icon.png` → `.ico` 변환, 창·작업 표시줄 아이콘 |
 | `upstage_classifier.py` | Solar Pro 4 구조화 JSON 분류 |
 | `outlook_adapter.py` | 클래식 Outlook Calendar/Task COM 연동 |
 | `storage.py`, `models.py` | SQLite와 WorkItem 모델 |

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from classifier import ClassificationResult
+import paths
 from models import (
     CALENDAR,
     REPEAT_FREQS,
@@ -52,7 +53,7 @@ REQUEST_TIMEOUT_SECONDS = 60.0
 RETRY_TIMEOUT_SECONDS = 90.0
 MAX_API_ATTEMPTS = 2
 
-PROFILE_PATH = Path(__file__).resolve().parent / "profile.json"
+PROFILE_PATH = paths.user_file("profile.json")
 DEFAULT_ROLE = "중학교 담임 교사"
 
 
@@ -94,7 +95,7 @@ REQUIRED_ITEM_FIELDS = (
 def load_local_env(path: str | Path | None = None) -> None:
     """Load simple KEY=value entries without overwriting real environment vars."""
 
-    env_path = Path(path) if path else Path(__file__).resolve().parent / ".env"
+    env_path = Path(path) if path else paths.user_file(".env")
     if not env_path.is_file():
         return
     try:

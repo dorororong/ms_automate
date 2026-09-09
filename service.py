@@ -34,11 +34,11 @@ from outlook_adapter import (
     parse_outlook_datetime,
 )
 from outlook_mirror import OutlookMirror
+import paths
 from storage import Database
 from upstage_classifier import classify_with_upstage, has_api_key
 
-APP_ROOT = Path(__file__).resolve().parent
-DATABASE_PATH = APP_ROOT / "data" / "work_items.sqlite3"
+DATABASE_PATH = paths.user_file("data", "work_items.sqlite3")
 
 
 @dataclass

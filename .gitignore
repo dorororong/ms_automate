@@ -11,3 +11,7 @@ profile.json
 
 # Excel 임시 잠금 파일
 ~$*.xlsx
+
+# PyInstaller 빌드 산출물
+build/
+dist/

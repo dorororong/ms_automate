@@ -1,6 +1,6 @@
 """앱 아이콘. 창과 트레이가 같은 그림 하나를 쓴다.
 
-원본은 프로젝트 폴더의 `tray_icon.png` 입니다. Windows 창과 알림 영역은 `.ico`
+원본은 `assets/tray_icon.png` 입니다. Windows 창과 알림 영역은 `.ico`
 를 요구하므로 첫 실행 때 한 번 변환해 임시 폴더에 캐시합니다. 원본을 바꾸면
 수정 시각이 달라져 자동으로 다시 만듭니다.
 
@@ -14,14 +14,15 @@ import ctypes
 from pathlib import Path
 import tempfile
 
+import paths
+
 try:
     from PIL import Image
 except ImportError:  # pragma: no cover - Pillow 미설치 환경
     Image = None
 
 
-APP_ROOT = Path(__file__).resolve().parent
-ICON_SOURCE = APP_ROOT / "tray_icon.png"
+ICON_SOURCE = paths.resource("assets", "tray_icon.png")
 
 # 원본은 반투명한 회색 배경 위에 아이콘이 얹혀 있다. 이 값보다 옅은 픽셀은
 # 배경으로 보고 완전히 지운다.

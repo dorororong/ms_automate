@@ -36,10 +36,10 @@ SQLite saved + EntryID 기록
 
 | 문서 | 내용 |
 |---|---|
-| [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md) | 구현 근거, 평가 기록 |
-| [LATENCY_REPORT.md](LATENCY_REPORT.md) | 프롬프트 축소, 속도 실측 |
-| [ACTION_EXTRACTION_SPEC.md](ACTION_EXTRACTION_SPEC.md) | 행동 단위 추출 규칙 |
-| [WORK_TREE.md](WORK_TREE.md) | 진행 상태, 다음 작업 |
+| [IMPLEMENTATION_REPORT.md](docs/IMPLEMENTATION_REPORT.md) | 구현 근거, 평가 기록 |
+| [LATENCY_REPORT.md](docs/LATENCY_REPORT.md) | 프롬프트 축소, 속도 실측 |
+| [ACTION_EXTRACTION_SPEC.md](docs/ACTION_EXTRACTION_SPEC.md) | 행동 단위 추출 규칙 |
+| [WORK_TREE.md](docs/WORK_TREE.md) | 진행 상태, 다음 작업 |
 
 - 저장소: [dorororong/ms_automate](https://github.com/dorororong/ms_automate) (비공개)
 - 기반이 된 원본: [progh2/catmoa](https://github.com/progh2/catmoa) — 변경 가하지 않음
@@ -50,16 +50,17 @@ SQLite saved + EntryID 기록
 
 1. [배경](#배경)
 2. [빠른 시작](#빠른-시작)
-3. [화면](#화면)
-4. [입력 방법](#입력-방법)
-5. [분석](#분석)
-6. [Outlook 등록](#outlook-등록)
-7. [저장 데이터](#저장-데이터)
-8. [검증 결과](#검증-결과)
-9. [개발자용](#개발자용)
-10. [문제 해결](#문제-해결)
-11. [개인정보](#개인정보)
-12. [범위 밖](#범위-밖)
+3. [실행 파일(exe)](#실행-파일exe)
+4. [화면](#화면)
+5. [입력 방법](#입력-방법)
+6. [분석](#분석)
+7. [Outlook 등록](#outlook-등록)
+8. [저장 데이터](#저장-데이터)
+9. [검증 결과](#검증-결과)
+10. [개발자용](#개발자용)
+11. [문제 해결](#문제-해결)
+12. [개인정보](#개인정보)
+13. [범위 밖](#범위-밖)
 
 ---
 
@@ -139,6 +140,47 @@ UPSTAGE_MODEL=solar-pro4
 
 ---
 
+## 실행 파일(exe)
+
+Python 설치 없이 쓰려면 실행 파일을 받는다.
+
+### 받기
+
+- GitHub 저장소 **Releases** 에서 `업무정리.exe` 다운로드
+- 저장소가 비공개이므로 접근 권한이 있는 계정으로 받아야 함
+- 릴리스는 `v*` 태그를 밀면 GitHub Actions 가 만들어 첨부
+  (`.github/workflows/build-exe.yml`)
+
+### 실행
+
+- exe 를 원하는 폴더에 두고 실행. 설치 과정 없음
+- **exe 를 둔 폴더**에 다음이 생기거나 읽힌다
+
+| 경로 | 용도 |
+|---|---|
+| `data/work_items.sqlite3` | 분석·등록 기록, Outlook 미러 (자동 생성) |
+| `.env` | `UPSTAGE_API=up_...` (없으면 오프라인 규칙 분석) |
+| `profile.json` | 담임/업무 판정용 사용자 역할 |
+
+- 클래식 Outlook 이 설치·로그인된 Windows 필요 (소스 실행과 동일)
+- 첫 실행은 압축 해제 때문에 수 초 걸림. 이후 창이 뜨면 동작은 같음
+- 이미지 OCR 은 exe 에 포함되지 않는 Tesseract 실행 파일이 따로 필요
+
+### 직접 빌드
+
+```powershell
+python -m pip install -r requirements.txt -r requirements-build.txt
+python -m PyInstaller ms_automate.spec
+python check_bundle.py
+```
+
+- 산출물: `dist/업무정리.exe` (약 51MB, onefile)
+- `check_bundle.py` 는 지연 임포트되는 PDF·HWP·OCR 의존성이 번들에 들어갔는지
+  검사. exe 를 실행해 보는 것만으로는 파일을 넣기 전까지 드러나지 않음
+- 실행 파일 아이콘은 `assets/tray_icon.png` 에서 빌드할 때 만들어짐
+
+---
+
 ## 화면
 
 ### 작은 상태 창
@@ -170,7 +212,7 @@ UPSTAGE_MODEL=solar-pro4
 - 왼쪽 클릭 → 창을 앞으로
 - 일시중지 중: 단축키·드롭·붙여넣기 입력을 대기열에 넣지 않음.
   이미 분석 중인 항목은 그대로 완료
-- 아이콘 원본은 `tray_icon.png`
+- 아이콘 원본은 `assets/tray_icon.png`
   - 첫 실행 때 `.ico`로 변환해 임시 폴더에 캐시
   - 창 제목 표시줄 · 작업 표시줄 · 알림 영역이 동일 그림 사용
   - 원본 교체 시 다음 실행에서 자동 재생성
@@ -554,7 +596,7 @@ python benchmark_latency.py --repeats 2 --baseline eb0f898
 
 - 프롬프트 축소 후 합성 메시지 8회: 평균 12.178초 → 4.606초
 - 완료 안내 2회 제외한 실제 추출 6회 평균 5.595초 → **목표 5초 미달**
-- 상세: [LATENCY_REPORT.md](LATENCY_REPORT.md)
+- 상세: [LATENCY_REPORT.md](docs/LATENCY_REPORT.md)
 
 반복 실행 편차
 
@@ -612,8 +654,9 @@ python benchmark_latency.py --repeats 2 --baseline eb0f898
 | `tray.py` | 알림 영역 아이콘, 일시중지/종료 메뉴 (전용 스레드 + 메시지 루프) |
 | `windows_drop.py` | Windows 파일 드래그앤드롭 브리지 |
 | `file_input.py` | 문서·이미지 로컬 텍스트 추출 |
-| `icons.py` | `tray_icon.png` → `.ico` 변환, 창·작업 표시줄 아이콘 |
+| `icons.py` | `assets/tray_icon.png` → `.ico` 변환, 창·작업 표시줄 아이콘 |
 | `theme.py` | 공통 색·글꼴·위젯 스타일 |
+| `paths.py` | 소스 실행 / exe 실행의 자원·사용자 데이터 경로 구분 |
 
 **검증**
 
@@ -623,6 +666,8 @@ python benchmark_latency.py --repeats 2 --baseline eb0f898
 | `test_review_flow.py` | Tk 위젯 조작 기반 검토창 회귀 검사 |
 | `test_compact_extraction.py` | 축약 응답·조건·반복·시간 차단 회귀 검사 |
 | `benchmark_latency.py` | 합성 메시지 API 속도·핵심 의미 비교 (API 호출) |
+| `check_bundle.py` | 빌드된 exe 번들에 필요한 모듈이 다 들어갔는지 검사 |
+| `ms_automate.spec` | PyInstaller 빌드 정의 |
 
 - 의존 방향 단방향: UI → service → 분류/저장/COM → models
 - `models.py` 수정 → 거의 전 모듈 영향
@@ -633,7 +678,7 @@ python benchmark_latency.py --repeats 2 --baseline eb0f898
 | 대상 | 위치 |
 |---|---|
 | 단축키 | `app.py`의 `VK_X`, `HOTKEY_LABEL`, `HotkeyListener(modifiers=...)` |
-| 아이콘 | `tray_icon.png` 교체 (투명 배경·정사각형 권장. 옅은 알파 배경은 자동 제거) |
+| 아이콘 | `assets/tray_icon.png` 교체 (투명 배경·정사각형 권장. 옅은 알파 배경은 자동 제거) |
 | 미러 동기화 주기 | `outlook_mirror.py`의 `SYNC_INTERVAL_SECONDS`(기본 300초), `STALE_AFTER_SECONDS` |
 | 창 위치·크기 | `app.py`의 `WINDOW_WIDTH`, `WINDOW_HEIGHT`, `EDGE_MARGIN` |
 
@@ -673,4 +718,4 @@ python benchmark_latency.py --repeats 2 --baseline eb0f898
 - New Outlook / Microsoft Graph 지원
 - 메일 발송
 
-진행 상태와 다음 작업 후보: [WORK_TREE.md](WORK_TREE.md)
+진행 상태와 다음 작업 후보: [WORK_TREE.md](docs/WORK_TREE.md)
