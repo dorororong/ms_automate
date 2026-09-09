@@ -8,3 +8,6 @@ data/*.db
 test_set_30.xlsx
 # 사용자별 학교/업무 프로필은 로컬 전용
 profile.json
+
+# Excel 임시 잠금 파일
+~$*.xlsx

@@ -315,6 +315,161 @@ def main() -> int:
             outcome.blocked and outcome.saved == 0 and failing_outlook.saved == 0,
         ))
 
+    print("\n[9] Outlook 로컬 미러")
+    from datetime import datetime
+    from outlook_adapter import OutlookEntry
+    from outlook_mirror import OutlookMirror, entry_to_row, row_to_entry
+
+    sample_entry = OutlookEntry(
+        item_type="todo",
+        entry_id="E1",
+        subject="명단 제출",
+        due=datetime(2026, 9, 15, 0, 0),
+    )
+    restored = row_to_entry(entry_to_row(sample_entry))
+    results.append(check(
+        "미러 행 왕복",
+        restored.subject == sample_entry.subject and restored.due == sample_entry.due,
+    ))
+
+    class CountingOutlook:
+        """읽기 횟수를 세어 미러가 COM 조회를 대신하는지 확인한다."""
+
+        def __init__(self, entries: list[object]) -> None:
+            self.entries = entries
+            self.reads = 0
+            self.saved: list[WorkItem] = []
+
+        def read_entries(self, limit: int = 200) -> list[object]:
+            self.reads += 1
+            return list(self.entries)
+
+        def save_work_item(self, item: WorkItem) -> str | None:
+            self.saved.append(item)
+            return f"ENTRY{len(self.saved)}"
+
+    with TemporaryDirectory() as temp_dir:
+        database = Database(Path(temp_dir) / "mirror.sqlite3")
+        outlook = CountingOutlook([sample_entry])
+        mirror = OutlookMirror(database, adapter_factory=lambda: outlook)
+        mirror.sync_once()
+        results.append(check("최초 전체 동기화", database.count_outlook_mirror() == 1))
+
+        workflow = WorkflowService(
+            database=database, outlook=outlook, mirror=mirror
+        )
+        reads_before = outlook.reads
+        duplicate = WorkItem(type="todo", title="명단 제출", due="2026-09-15")
+        conflicts = workflow.find_conflicts([duplicate])
+        results.append(check(
+            "미러로 중복 검출 · COM 재조회 없음",
+            bool(conflicts) and outlook.reads == reads_before,
+        ))
+
+        fresh = WorkItem(type="todo", title="새 업무 보고", due="2026-09-20")
+        database.create_input("selftest write-through", [fresh])
+        outcome = workflow.record([fresh])
+        again = WorkItem(type="todo", title="새 업무 보고", due="2026-09-20")
+        results.append(check(
+            "등록 직후 미러 반영 (write-through)",
+            outcome.saved == 1 and bool(workflow.find_conflicts([again])),
+        ))
+
+        outlook.entries = []
+        mirror.sync_once()
+        remaining = {row["entry_id"] for row in database.read_outlook_mirror()}
+        results.append(check(
+            "Outlook에서 사라진 항목은 미러에서도 제거",
+            "E1" not in remaining,
+        ))
+
+    print("\n[10] 마감일 캘린더 표시")
+    from models import DUE_MARKER_CATEGORY, due_marker_subject
+    from service import _entry_interval, _is_due_marker
+
+    marker_wanted = WorkItem(type="todo", title="명단 제출", due="2026-09-21")
+    results.append(check("마감 있는 작업은 표시 대상", marker_wanted.wants_due_marker))
+    results.append(check(
+        "체크를 끄면 표시하지 않음",
+        not WorkItem(
+            type="todo", title="명단 제출", due="2026-09-21",
+            show_due_on_calendar=False,
+        ).wants_due_marker,
+    ))
+    results.append(check(
+        "마감 없는 할 일은 표시 대상 아님",
+        not WorkItem(type="todo", title="바로 처리").wants_due_marker,
+    ))
+    results.append(check(
+        "일정 항목은 표시 대상 아님",
+        not WorkItem(
+            type="calendar", title="회의", start="2026-09-22T15:00"
+        ).wants_due_marker,
+    ))
+
+    marker_entry = OutlookEntry(
+        item_type="calendar",
+        entry_id="M1",
+        subject=due_marker_subject("명단 제출"),
+        start=datetime(2026, 9, 21, 0, 0),
+        end=datetime(2026, 9, 22, 0, 0),
+        all_day=True,
+        category=DUE_MARKER_CATEGORY,
+    )
+    results.append(check("마감 표시 인식", _is_due_marker(marker_entry)))
+    results.append(check(
+        "마감 표시는 시간 겹침에서 제외", _entry_interval(marker_entry) is None
+    ))
+
+    class MarkerOutlook(CountingOutlook):
+        def __init__(self, entries):
+            super().__init__(entries)
+            self.markers: list[WorkItem] = []
+
+        def save_due_marker(self, item: WorkItem) -> str:
+            self.markers.append(item)
+            return f"MARK{len(self.markers)}"
+
+    with TemporaryDirectory() as temp_dir:
+        database = Database(Path(temp_dir) / "marker.sqlite3")
+        outlook = MarkerOutlook([])
+        mirror = OutlookMirror(database, adapter_factory=lambda: outlook)
+        mirror.sync_once()
+        workflow = WorkflowService(
+            database=database, outlook=outlook, mirror=mirror
+        )
+
+        item = WorkItem(type="todo", title="명단 제출", due="2026-09-21")
+        database.create_input("selftest due marker", [item])
+        outcome = workflow.record([item])
+        results.append(check(
+            "작업 등록과 함께 마감 표시 생성",
+            outcome.saved == 1
+            and len(outlook.markers) == 1
+            and item.calendar_entry_id == "MARK1",
+        ))
+        results.append(check(
+            "마감 표시 EntryID를 DB에 기록",
+            database.get_work_items(item.input_id)[0].calendar_entry_id == "MARK1",
+        ))
+
+        # 같은 마감이 다시 등록돼도 표시는 하나만 남아야 한다.
+        again = WorkItem(type="todo", title="명단 제출", due="2026-09-21")
+        database.create_input("selftest due marker 2", [again])
+        workflow._add_due_marker(again, outcome)
+        results.append(check(
+            "같은 마감 표시를 두 번 만들지 않음", len(outlook.markers) == 1
+        ))
+
+        # 마감 표시가 그날의 실제 일정 등록을 막지 않아야 한다.
+        same_day = WorkItem(
+            type="calendar", title="상담", start="2026-09-21T14:00"
+        )
+        results.append(check(
+            "마감 표시가 그날 일정 등록을 막지 않음",
+            not workflow.find_conflicts([same_day]),
+        ))
+
     if not args.offline:
         print("\n[7] Solar Pro 4 구조화 (Outlook 기록 없음)")
         from upstage_classifier import classify_with_upstage

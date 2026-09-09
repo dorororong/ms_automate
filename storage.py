@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS work_items (
     repeat_detail TEXT NOT NULL DEFAULT '',
     saved INTEGER NOT NULL DEFAULT 0 CHECK(saved IN (0, 1)),
     outlook_entry_id TEXT,
+    -- 마감 작업을 캘린더에도 표시할 때 만들어지는 두 번째 Outlook 항목
+    calendar_entry_id TEXT,
     last_error TEXT,
     outlook_status TEXT NOT NULL DEFAULT 'pending'
         CHECK(outlook_status IN ('pending', 'saved', 'failed', 'deleted')),
@@ -45,11 +47,71 @@ CREATE TABLE IF NOT EXISTS work_items (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+-- 로컬 Outlook 미러. 중복 검사는 COM 대신 이 표를 읽는다.
+CREATE TABLE IF NOT EXISTS outlook_mirror (
+    entry_id TEXT PRIMARY KEY,
+    item_type TEXT NOT NULL CHECK(item_type IN ('calendar', 'todo')),
+    subject TEXT NOT NULL DEFAULT '',
+    start TEXT,
+    end TEXT,
+    due TEXT,
+    all_day INTEGER NOT NULL DEFAULT 0 CHECK(all_day IN (0, 1)),
+    location TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT '',
+    reminder TEXT,
+    reminder_minutes INTEGER,
+    complete INTEGER,
+    body TEXT NOT NULL DEFAULT '',
+    origin TEXT NOT NULL DEFAULT 'outlook' CHECK(origin IN ('outlook', 'app')),
+    synced_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_outlook_mirror_type
+    ON outlook_mirror(item_type);
+
+CREATE TABLE IF NOT EXISTS sync_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
+
+MIRROR_COLUMNS = (
+    "entry_id",
+    "item_type",
+    "subject",
+    "start",
+    "end",
+    "due",
+    "all_day",
+    "location",
+    "category",
+    "reminder",
+    "reminder_minutes",
+    "complete",
+    "body",
+)
 
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def utc_now_precise_iso() -> str:
+    """Microsecond stamp for the mirror.
+
+    A full sync drops rows it did not just see by comparing `synced_at`
+    against the moment the Outlook read began, so two writes inside the same
+    second have to stay distinguishable.  Every `synced_at` value uses this
+    precision so the strings also sort correctly against each other.
+    """
+
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
 
 
 class Database:
@@ -59,7 +121,8 @@ class Database:
 
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path)
+        # 미러 동기화 스레드와 Tk 스레드가 같은 파일에 쓰므로 잠금을 기다린다.
+        connection = sqlite3.connect(self.path, timeout=15.0)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
@@ -114,6 +177,9 @@ class Database:
                 "ALTER TABLE work_items ADD COLUMN repeat_detail TEXT NOT NULL DEFAULT ''"
             ),
             "due_time": "ALTER TABLE work_items ADD COLUMN due_time TEXT",
+            "calendar_entry_id": (
+                "ALTER TABLE work_items ADD COLUMN calendar_entry_id TEXT"
+            ),
             "semantic_json": (
                 "ALTER TABLE work_items ADD COLUMN semantic_json TEXT NOT NULL DEFAULT '{}'"
             ),
@@ -256,6 +322,19 @@ class Database:
         finally:
             connection.close()
 
+    def mark_due_marker(self, work_item_id: int, entry_id: str | None) -> None:
+        """마감 캘린더 표시의 EntryID를 남긴다. 작업 자체의 등록과는 별개다."""
+
+        connection = self._connect()
+        try:
+            connection.execute(
+                "UPDATE work_items SET calendar_entry_id = ?, updated_at = ? WHERE id = ?",
+                (entry_id, utc_now_iso(), work_item_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
     def mark_failed(self, work_item_id: int, error: str) -> None:
         connection = self._connect()
         try:
@@ -303,6 +382,118 @@ class Database:
                 "ORDER BY id"
             ).fetchall()
             return [WorkItem.from_row(row) for row in rows]
+        finally:
+            connection.close()
+
+    # --- Outlook 미러 --------------------------------------------------
+
+    def _upsert_mirror_rows(
+        self,
+        connection: sqlite3.Connection,
+        rows: list[dict[str, object]],
+        *,
+        origin: str,
+        synced_at: str,
+    ) -> None:
+        columns = ", ".join(MIRROR_COLUMNS)
+        placeholders = ", ".join("?" for _ in MIRROR_COLUMNS)
+        assignments = ", ".join(
+            f"{name} = excluded.{name}" for name in MIRROR_COLUMNS[1:]
+        )
+        connection.executemany(
+            f"""
+            INSERT INTO outlook_mirror ({columns}, origin, synced_at)
+            VALUES ({placeholders}, ?, ?)
+            ON CONFLICT(entry_id) DO UPDATE SET
+                {assignments}, origin = excluded.origin, synced_at = excluded.synced_at
+            """,
+            [
+                tuple(row.get(name) for name in MIRROR_COLUMNS) + (origin, synced_at)
+                for row in rows
+            ],
+        )
+
+    def sync_outlook_mirror(
+        self, rows: list[dict[str, object]], *, started_at: str
+    ) -> int:
+        """Replace the mirror with one full Outlook read.
+
+        Rows written by this app while the read was running carry a newer
+        `synced_at` than `started_at`, so they survive the cleanup that drops
+        items which disappeared from Outlook.
+        """
+
+        synced_at = utc_now_precise_iso()
+        connection = self._connect()
+        try:
+            self._upsert_mirror_rows(
+                connection, rows, origin="outlook", synced_at=synced_at
+            )
+            connection.execute(
+                "DELETE FROM outlook_mirror WHERE synced_at < ?", (started_at,)
+            )
+            connection.execute(
+                "INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+                "updated_at = excluded.updated_at",
+                ("outlook_mirror_synced_at", synced_at, synced_at),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return len(rows)
+
+    def upsert_outlook_entry(self, row: dict[str, object]) -> None:
+        """Write through one item this app just created or changed in Outlook."""
+
+        connection = self._connect()
+        try:
+            self._upsert_mirror_rows(
+                connection, [row], origin="app", synced_at=utc_now_precise_iso()
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def delete_outlook_entry(self, entry_id: str) -> None:
+        connection = self._connect()
+        try:
+            connection.execute(
+                "DELETE FROM outlook_mirror WHERE entry_id = ?", (entry_id,)
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def read_outlook_mirror(self) -> list[sqlite3.Row]:
+        connection = self._connect()
+        try:
+            return connection.execute(
+                "SELECT * FROM outlook_mirror ORDER BY start, due, subject"
+            ).fetchall()
+        finally:
+            connection.close()
+
+    def count_outlook_mirror(self) -> int:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM outlook_mirror"
+            ).fetchone()
+            return int(row["count"])
+        finally:
+            connection.close()
+
+    def get_sync_state(self, key: str) -> str | None:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT value FROM sync_state WHERE key = ?", (key,)
+            ).fetchone()
+            return None if row is None else str(row["value"])
         finally:
             connection.close()
 

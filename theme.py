@@ -58,9 +58,9 @@ def apply_theme(root: tk.Misc) -> ttk.Style:
     style.configure("Card.TLabel", background=SURFACE, foreground=TEXT, font=F_BODY)
     style.configure("CardMuted.TLabel", background=SURFACE, foreground=MUTED, font=F_SMALL)
     style.configure("CardHead.TLabel", background=SURFACE, foreground=TEXT, font=F_HEAD)
-    # 체크박스는 tk.Checkbutton 을 쓴다 (theme.checkbox 참고). clam 의 ttk
-    # 체크 글리프는 'X' 로 그려져 '거부'처럼 읽히고, indicatorcolor 를 덮으면
-    # 글리프가 통째로 사라진다.
+    # clam 의 ttk 체크 글리프는 'X' 로 그려져 '거부'처럼 읽히고, indicatorcolor 를
+    # 덮으면 글리프가 통째로 사라진다. 카드의 `종일`처럼 남은 체크박스는 그
+    # 제약을 감안해 부수적인 자리에만 둔다.
     for name, bg in (("Card.TRadiobutton", SURFACE), ("TRadiobutton", BG)):
         style.configure(name, background=bg, font=F_BODY, indicatormargin=3)
         style.map(name,
@@ -103,11 +103,15 @@ def header(parent: tk.Misc, title: str, subtitle: str = "") -> ttk.Frame:
 
 
 def checkbox(parent: tk.Misc, text: str, variable: tk.BooleanVar,
-             background: str = SURFACE) -> tk.Checkbutton:
-    """네이티브 체크 표시가 나오는 체크박스."""
+             command=None, background: str = SURFACE) -> tk.Checkbutton:
+    """네이티브 체크 표시가 나오는 체크박스.
+
+    clam 의 ttk 체크 글리프는 'X' 로 그려져 켠 상태가 '거부'처럼 읽힌다.
+    켜고 끄는 뜻이 분명해야 하는 자리에는 tk.Checkbutton 을 쓴다.
+    """
 
     return tk.Checkbutton(
-        parent, text=text, variable=variable, font=F_BODY,
+        parent, text=text, variable=variable, command=command, font=F_BODY,
         background=background, activebackground=background,
         foreground=TEXT, activeforeground=ACCENT, selectcolor="#ffffff",
         highlightthickness=0, borderwidth=0, anchor="w", padx=0,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from datetime import date
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -13,6 +14,35 @@ from cards import WorkItemCard
 from models import SCOPE_REFERENCE, WorkItem
 from outlook_adapter import OutlookOperationError, OutlookUnavailableError
 from service import Analysis, WorkflowService
+
+
+@dataclass
+class MessageGroup:
+    """One analysed message inside the shared review list.
+
+    Results that arrive while an earlier message is still open are appended
+    here instead of queueing behind it, so several messages can be cleared in
+    one pass.
+    """
+
+    analysis: Analysis
+    order: int
+    frame: ttk.Frame | None = None
+    header: ttk.Label | None = None
+    cards: list[WorkItemCard] = field(default_factory=list)
+    hidden_items: list[WorkItem] = field(default_factory=list)
+
+    @property
+    def pending(self) -> list[WorkItemCard]:
+        return [card for card in self.cards if card.is_pending()]
+
+    @property
+    def label(self) -> str:
+        compact = " ".join(self.analysis.text.split())
+        if not compact:
+            return f"메시지 {self.order}"
+        head = compact[:34] + ("…" if len(compact) > 34 else "")
+        return f"메시지 {self.order} · {head}"
 
 
 class ReviewWindow(tk.Toplevel):
@@ -34,11 +64,14 @@ class ReviewWindow(tk.Toplevel):
         self.on_reanalyze = on_reanalyze
         self._finished = False
         self.analysis: Analysis | None = None
-        self.cards: list[WorkItemCard] = []
-        self.hidden_items: list[WorkItem] = []
+        self.groups: list[MessageGroup] = []
+        self.focused: MessageGroup | None = None
+        self._queue_pending = 0
+        self._actions = 0
+        self._registered = 0
 
         self.title("일정 확인 · Outlook")
-        self.geometry("760x620")
+        self.geometry(self._placement(760, 620))
         self.minsize(580, 440)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
@@ -59,6 +92,23 @@ class ReviewWindow(tk.Toplevel):
         self.bind("<Control-Return>", self._on_control_return)
 
     # --- construction -------------------------------------------------
+
+    def _placement(self, width: int, height: int) -> str:
+        """오른쪽 아래를 비워 둔다.
+
+        작은 실행 창이 항상 위에 떠 있으므로, 화면 오른쪽 아래에 겹치면 이 창의
+        `모두 등록`·`닫기` 버튼을 가립니다. 왼쪽 위 여백에 자리를 잡습니다.
+        """
+
+        margin = 24
+        x = margin
+        y = margin
+        try:
+            x = min(margin, max(0, self.winfo_screenwidth() - width - margin))
+            y = min(margin, max(0, self.winfo_screenheight() - height - margin))
+        except tk.TclError:
+            pass
+        return f"{width}x{height}+{x}+{y}"
 
     def _build_ui(self) -> None:
         P = theme.PAD_X
@@ -140,12 +190,6 @@ class ReviewWindow(tk.Toplevel):
         ttk.Label(header_row, textvariable=self.queue_var, style="Muted.TLabel").grid(
             row=0, column=1, sticky="e", padx=(6, 0)
         )
-        ttk.Button(header_row, text="전체", width=5, command=lambda: self._set_all(True)).grid(
-            row=0, column=2, padx=(6, 0)
-        )
-        ttk.Button(header_row, text="해제", width=5, command=lambda: self._set_all(False)).grid(
-            row=0, column=3, padx=(4, 0)
-        )
 
         self.copy_button = ttk.Button(self, text="JSON 복사", command=self._copy_json,
                                       state="disabled")
@@ -179,11 +223,11 @@ class ReviewWindow(tk.Toplevel):
         bottom.columnconfigure(0, weight=1)
         ttk.Label(bottom, textvariable=self.status_var, style="Muted.TLabel").grid(
             row=0, column=0, sticky="w")
-        ttk.Button(bottom, text="미등록", command=self.skip).grid(
+        ttk.Button(bottom, text="닫기", command=self.close).grid(
             row=0, column=1, padx=(8, 0)
         )
         self.save_button = ttk.Button(
-            bottom, text="등록", style="Accent.TButton",
+            bottom, text="모두 등록", style="Accent.TButton",
             command=self.save_to_outlook, state="disabled")
         self.save_button.grid(row=0, column=2, padx=(8, 0))
 
@@ -286,14 +330,63 @@ class ReviewWindow(tk.Toplevel):
         self.source_toggle_button.configure(text="원문 수정")
         self._update_source_preview(text)
 
-    def present_analysis(self, analysis: Analysis) -> None:
-        """Display a completed analysis; no LLM work occurs in this window."""
+    @property
+    def cards(self) -> list[WorkItemCard]:
+        """Every card currently on screen, in message order."""
 
-        self.analysis = analysis
+        return [card for group in self.groups for card in group.cards]
+
+    def present_analysis(self, analysis: Analysis) -> None:
+        """Display a completed analysis; no LLM work occurs in this window.
+
+        A result that lands while an earlier message is still being handled is
+        appended below it rather than waiting for that message to be closed.
+        """
+
+        group = self._add_group(analysis)
+        if len(self.groups) == 1:
+            self._set_focus(group)
+            self.raise_window()
+        else:
+            self._advance_focus()
+            self.status_var.set(
+                f"분석이 끝난 메시지 {len(self.groups)}건을 이어서 보여줍니다."
+            )
+        self._update_save_button()
+
+    def _set_focus(self, group: MessageGroup) -> None:
+        """Point the left pane at one message without touching its cards."""
+
+        self.focused = group
+        self.analysis = group.analysis
         self._source_dirty = False
-        self._set_input_text(analysis.text)
-        self._show_analysis(analysis)
-        self.raise_window()
+        self._set_input_text(group.analysis.text)
+        self.source_var.set(
+            f"{group.analysis.model} · #{group.analysis.input_id}"
+        )
+        for other in self.groups:
+            if other.header is None:
+                continue
+            other.header.configure(
+                style="Head.TLabel" if other is group else "Muted.TLabel"
+            )
+
+    def _advance_focus(self) -> None:
+        """Follow the work: move the left pane to the next unhandled message."""
+
+        if self.focused is not None and self.focused.pending:
+            return
+        for group in self.groups:
+            if group.pending:
+                if group is not self.focused:
+                    self._set_focus(group)
+                return
+
+    def _group_of(self, card: WorkItemCard) -> MessageGroup | None:
+        for group in self.groups:
+            if card in group.cards:
+                return group
+        return None
 
     def raise_window(self) -> None:
         """Pull the window to the front; the hotkey fires from another app."""
@@ -316,11 +409,6 @@ class ReviewWindow(tk.Toplevel):
     def close(self) -> None:
         self._finish("skipped")
 
-    def skip(self) -> None:
-        """Leave the current result unregistered and show the next queued one."""
-
-        self._finish("skipped")
-
     def _finish(self, decision: str) -> None:
         if self._finished:
             return
@@ -335,12 +423,6 @@ class ReviewWindow(tk.Toplevel):
         finally:
             if self.winfo_exists():
                 self.destroy()
-
-    def _has_unsaved_items(self) -> bool:
-        return any(
-            not card.item.saved and not card.item.excluded_reason
-            for card in self.cards
-        )
 
     def _on_control_return(self, _event: tk.Event) -> str:
         self.save_to_outlook()
@@ -361,16 +443,42 @@ class ReviewWindow(tk.Toplevel):
             messagebox.showwarning("분석", "분석할 텍스트가 없습니다.", parent=self)
             return
         reference = self.reference_var.get().strip() or None
-        if self.on_reanalyze is not None:
-            self.on_reanalyze(text, use_ai, reference)
-            self._finish("reanalysis")
+        if self.on_reanalyze is None:
+            self.status_var.set("분석 대기열에 연결된 창에서 다시 분석하세요.")
             return
-        self.status_var.set("분석 대기열에 연결된 창에서 다시 분석하세요.")
+        self.on_reanalyze(text, use_ai, reference)
+        # 다른 메시지가 함께 열려 있으면 이 메시지만 목록에서 뺀다.
+        if self.focused is not None and len(self.groups) > 1:
+            self._remove_group(self.focused)
+            self.status_var.set("이 메시지는 다시 분석합니다. 나머지는 그대로 둡니다.")
+            return
+        self._finish("reanalysis")
+
+    def _remove_group(self, group: MessageGroup) -> None:
+        """Take one message off the shared list without closing the window."""
+
+        if group.frame is not None:
+            group.frame.destroy()
+        if group in self.groups:
+            self.groups.remove(group)
+        for order, remaining in enumerate(self.groups, start=1):
+            remaining.order = order
+            if remaining.header is not None:
+                remaining.header.configure(text=remaining.label)
+        if self.focused is group:
+            self.focused = None
+            self.analysis = None
+            if self.groups:
+                self._set_focus(self.groups[0])
+            else:
+                self._set_input_text("")
+        self._advance_focus()
+        self._update_save_button()
 
     def reanalyze(self, *, use_ai: bool) -> None:
         self.request_reanalysis(use_ai=use_ai)
 
-    def _show_analysis(self, analysis: Analysis) -> None:
+    def _add_group(self, analysis: Analysis) -> MessageGroup:
         self.status_var.set("기존 Outlook 내역과 겹치는지 확인합니다…")
         self.update_idletasks()
         try:
@@ -389,16 +497,15 @@ class ReviewWindow(tk.Toplevel):
             analysis.work_items[index].excluded_reason = reason
             analysis.work_items[index].selected = False
 
-        self.analysis = analysis
-        self.source_var.set(f"{analysis.model} · #{analysis.input_id}")
+        group = MessageGroup(analysis=analysis, order=len(self.groups) + 1)
+        self.groups.append(group)
         self._set_source_visible(False)
-        self._render_cards(analysis)
+        self._render_group(group)
+        self.summary_var.set(self._summary_text())
 
         if analysis.registerable:
-            self.summary_var.set(analysis.summary)
-            self.save_button.configure(state="normal")
             if analysis.ready_to_register:
-                self.status_var.set("내용을 확인·수정한 뒤 등록할 항목을 체크하세요.")
+                self.status_var.set("카드의 등록·미등록으로 바로 처리하세요.")
             elif any(item.blocking_review_issues for item in analysis.registerable):
                 self.status_var.set("확인이 필요한 항목은 수정 후 등록할 수 있습니다.")
             elif any(item.applicability == "unknown" for item in analysis.registerable):
@@ -406,12 +513,8 @@ class ReviewWindow(tk.Toplevel):
             else:
                 self.status_var.set("중복 항목은 제외했습니다. 제목·시간을 바꾸면 다시 등록할 수 있습니다.")
         elif analysis.work_items:
-            self.summary_var.set(analysis.summary)
-            self.save_button.configure(state="disabled")
             self.status_var.set("등록할 새 업무가 없습니다. 제외/참조 내용을 확인하세요.")
         else:
-            self.summary_var.set("등록할 항목이 없습니다.")
-            self.save_button.configure(state="disabled")
             self.status_var.set("참조로 분류된 내용만 있습니다.")
 
         self.copy_button.configure(state="normal")
@@ -419,22 +522,34 @@ class ReviewWindow(tk.Toplevel):
         self._update_save_button()
         if analysis.warning:
             self.status_var.set(analysis.warning)
+        return group
 
-    def _set_all(self, checked: bool) -> None:
-        for card in self.cards:
-            if card.item.saved or card.item.excluded_reason or not card.can_register_now():
-                card.selected_var.set(False)
-            elif card.scope_var.get().strip() == SCOPE_REFERENCE:
-                card.selected_var.set(False)
-            else:
-                card.selected_var.set(checked)
-        self._update_save_button()
+    def _summary_text(self) -> str:
+        if not self.groups:
+            return "등록할 항목이 없습니다."
+        if len(self.groups) == 1:
+            return self.groups[0].analysis.summary
+        pending = sum(len(group.pending) for group in self.groups)
+        return f"메시지 {len(self.groups)}건 · 남은 항목 {pending}건"
 
-    def _render_cards(self, analysis: Analysis) -> None:
-        for child in self.cards_frame.winfo_children():
-            child.destroy()
-        self.cards = []
-        self.hidden_items = []
+    def _render_group(self, group: MessageGroup) -> None:
+        analysis = group.analysis
+        container = ttk.Frame(self.cards_frame)
+        container.grid(
+            row=len(self.groups), column=0, sticky="ew", padx=(0, 4), pady=(0, 4)
+        )
+        container.columnconfigure(0, weight=1)
+        group.frame = container
+
+        # 메시지가 둘 이상일 때만 구분선을 넣어 단일 메시지 화면을 그대로 둔다.
+        if group.order > 1:
+            theme.divider(container).grid(row=0, column=0, sticky="ew", pady=(2, 6))
+        header = ttk.Label(
+            container, text=group.label, style="Head.TLabel", anchor="w", cursor="hand2"
+        )
+        header.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        header.bind("<Button-1>", lambda _e, g=group: self._set_focus(g))
+        group.header = header
 
         visible_items: list[WorkItem] = []
         for item in analysis.work_items:
@@ -443,26 +558,28 @@ class ReviewWindow(tk.Toplevel):
                 or item.source_state in {"completed", "informational"}
                 or item.excluded_reason
             ):
-                self.hidden_items.append(item)
+                group.hidden_items.append(item)
             else:
                 visible_items.append(item)
 
         if not visible_items:
-            ttk.Label(self.cards_frame, text="분석 결과가 없습니다.", style="Muted.TLabel").grid(
-                row=0, column=0, padx=4, pady=8, sticky="w"
+            ttk.Label(container, text="분석 결과가 없습니다.", style="Muted.TLabel").grid(
+                row=2, column=0, padx=4, pady=8, sticky="w"
             )
         for index, item in enumerate(visible_items, start=1):
             card = WorkItemCard(
-                self.cards_frame,
+                container,
                 item,
                 index,
                 on_change=self._update_save_button,
+                on_register=self._register_card,
+                on_dismiss=self._dismiss_card,
             )
-            card.frame.grid(row=index, column=0, sticky="ew", padx=(0, 4), pady=(0, 8))
-            self.cards.append(card)
+            card.frame.grid(row=index + 1, column=0, sticky="ew", padx=(0, 4), pady=(0, 8))
+            group.cards.append(card)
 
         ignored_lines = list(analysis.ignored)
-        for item in self.hidden_items:
+        for item in group.hidden_items:
             if item.title in ignored_lines:
                 continue
             if item.source_state in {"completed", "informational"}:
@@ -474,9 +591,9 @@ class ReviewWindow(tk.Toplevel):
             ignored_lines.append(f"{item.title} ({label})")
 
         if ignored_lines:
-            ignored_row = ttk.Frame(self.cards_frame)
+            ignored_row = ttk.Frame(container)
             ignored_row.grid(
-                row=len(self.cards) + 1,
+                row=len(group.cards) + 2,
                 column=0,
                 sticky="ew",
                 padx=4,
@@ -507,66 +624,84 @@ class ReviewWindow(tk.Toplevel):
             )
             ignored_toggle.grid(row=0, column=0, sticky="w")
 
-        self.canvas.yview_moveto(0.0)
+        if group.order == 1:
+            self.canvas.yview_moveto(0.0)
         self._update_save_button()
 
-    def _update_save_button(self) -> None:
-        if not hasattr(self, "save_button"):
-            return
-        count = sum(
-            1
+    # --- 카드 단위 처리 --------------------------------------------------
+
+    def _bulk_candidates(self) -> list[WorkItemCard]:
+        """Cards that `모두 등록` would take, i.e. the safe defaults."""
+
+        return [
+            card
             for card in self.cards
-            if card.selected_var.get()
+            if card.is_pending()
+            and card.selected_var.get()
             and card.can_register_now()
-            and not card.item.saved
             and not card.item.excluded_reason
-        )
-        self.save_button.configure(text=f"{count}건 등록" if count else "등록")
+        ]
+
+    def _update_save_button(self) -> None:
+        # 카드의 변수 추적이 창이 닫힌 뒤에 울릴 수 있다.
+        if not hasattr(self, "save_button") or self._finished or not self.winfo_exists():
+            return
+        count = len(self._bulk_candidates())
+        self.save_button.configure(text=f"모두 등록 {count}건" if count else "모두 등록")
         self.save_button.configure(state="normal" if count else "disabled")
+        self.summary_var.set(self._summary_text())
 
-    def set_queue_status(self, count: int) -> None:
-        """Show pending analyses without adding another panel to the UI."""
+    def _register_card(self, card: WorkItemCard) -> None:
+        """Register exactly this card, right now."""
 
-        self.queue_var.set(f"대기 {count}건" if count else "")
-
-    # --- recording ----------------------------------------------------
-
-    def save_to_outlook(self) -> None:
-        if self._source_dirty:
+        group = self._group_of(card)
+        if group is None:
+            return
+        if group is self.focused and self._source_dirty:
             messagebox.showwarning(
                 "Outlook 등록",
                 "원문이 변경되었습니다. ⋯에서 다시 분석한 뒤 등록하세요.",
                 parent=self,
             )
             return
-        if self.analysis is None or not self.cards:
-            messagebox.showwarning("Outlook 등록", "먼저 텍스트를 분석하세요.", parent=self)
-            return
         try:
-            drafts = [card.to_work_item() for card in self.cards]
+            draft = card.to_work_item()
         except ValueError as exc:
             messagebox.showerror("Outlook 등록", str(exc), parent=self)
             return
-        if not any(item.selected and not item.saved for item in drafts):
-            messagebox.showinfo("Outlook 등록", "등록할 항목을 선택하세요.", parent=self)
-            return
+        # 카드의 등록 버튼을 누른 것 자체가 명시적 선택이다.
+        draft.selected = True
 
-        self.save_button.configure(state="disabled")
-        self.status_var.set("현재 로그인된 Outlook에 등록하는 중...")
+        card.register_button.configure(state="disabled")
+        self.status_var.set(f"{draft.title or '항목'} 등록 중…")
         self.update_idletasks()
+        outcome = self.service.record([draft])
+        self._apply_outcome([(card, draft)], outcome)
+        if not outcome.blocked:
+            self._actions += 1
+        self._after_action()
 
-        # Outlook COM is apartment-threaded; this stays on the Tk thread.
-        outcome = self.service.record(drafts)
+    def _dismiss_card(self, card: WorkItemCard) -> None:
+        if card.dismissed:
+            self._actions += 1
+            self.status_var.set("미등록으로 두었습니다. 되돌리기로 다시 켤 수 있습니다.")
+        self._after_action()
 
-        for index, (card, item) in enumerate(zip(self.cards, drafts)):
+    def _apply_outcome(
+        self, pairs: list[tuple[WorkItemCard, WorkItem]], outcome: Any
+    ) -> None:
+        for index, (card, item) in enumerate(pairs):
             if index in outcome.duplicates:
                 card.mark_excluded(outcome.duplicates[index])
             elif index in outcome.errors:
                 card.mark_failed(outcome.errors[index])
             elif item.saved and not card.item.saved:
                 card.mark_saved(item.outlook_entry_id)
+                self._registered += 1
+            else:
+                # 중복 확인 실패 등으로 아무 일도 없었으면 버튼을 되살린다.
+                card.refresh_state()
 
-        self.save_button.configure(state="normal")
         parts = [f"Outlook 등록 {outcome.saved}개"]
         if outcome.skipped:
             parts.append(f"참조 {outcome.skipped}개는 로컬 기록만")
@@ -579,9 +714,69 @@ class ReviewWindow(tk.Toplevel):
         if outcome.warning:
             parts.append(outcome.warning)
         self.status_var.set(" · ".join(parts))
+
+    def _all_handled(self) -> bool:
+        return bool(self.groups) and not any(group.pending for group in self.groups)
+
+    def _after_action(self) -> None:
+        if self._finished:
+            return
         self._update_save_button()
-        if outcome.failed == 0 and not outcome.blocked:
-            self._finish("registered")
+        self._advance_focus()
+        # 처리할 카드도 분석 대기도 남지 않았을 때만 창을 닫는다.
+        if self._actions and self._all_handled() and self._queue_pending == 0:
+            self._finish("registered" if self._registered else "skipped")
+
+    def set_queue_status(self, count: int) -> None:
+        """Show analyses still running; ready ones are already on screen."""
+
+        self._queue_pending = count
+        if self._finished:
+            return
+        self.queue_var.set(f"분석 중 {count}건" if count else "")
+        if count == 0:
+            self._after_action()
+
+    # --- recording ----------------------------------------------------
+
+    def save_to_outlook(self) -> None:
+        """Register every remaining card that the analysis already trusts.
+
+        Cards the classifier deselected (conditional, blocked, reference) stay
+        untouched here; those are registered one at a time from the card.
+        """
+
+        if self._source_dirty:
+            messagebox.showwarning(
+                "Outlook 등록",
+                "원문이 변경되었습니다. ⋯에서 다시 분석한 뒤 등록하세요.",
+                parent=self,
+            )
+            return
+        candidates = self._bulk_candidates()
+        if not candidates:
+            messagebox.showinfo(
+                "Outlook 등록", "카드의 등록 버튼으로 하나씩 처리하세요.", parent=self
+            )
+            return
+        try:
+            pairs = [(card, card.to_work_item()) for card in candidates]
+        except ValueError as exc:
+            messagebox.showerror("Outlook 등록", str(exc), parent=self)
+            return
+        for _card, draft in pairs:
+            draft.selected = True
+
+        self.save_button.configure(state="disabled")
+        self.status_var.set("현재 로그인된 Outlook에 등록하는 중...")
+        self.update_idletasks()
+
+        # Outlook COM is apartment-threaded; this stays on the Tk thread.
+        outcome = self.service.record([draft for _card, draft in pairs])
+        self._apply_outcome(pairs, outcome)
+        if not outcome.blocked:
+            self._actions += 1
+        self._after_action()
 
     # --- JSON ---------------------------------------------------------
 

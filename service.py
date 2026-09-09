@@ -19,10 +19,12 @@ import re
 from classifier import ClassificationResult, classify_text
 from models import (
     CALENDAR,
+    DUE_MARKER_CATEGORY,
     ReviewIssue,
     SCOPE_REFERENCE,
     TODO,
     WorkItem,
+    due_marker_subject,
 )
 from outlook_adapter import (
     OutlookEntry,
@@ -31,6 +33,7 @@ from outlook_adapter import (
     OutlookUnavailableError,
     parse_outlook_datetime,
 )
+from outlook_mirror import OutlookMirror
 from storage import Database
 from upstage_classifier import classify_with_upstage, has_api_key
 
@@ -134,8 +137,17 @@ def _draft_interval(item: WorkItem) -> tuple[datetime, datetime] | None:
     return _calendar_interval(start, end, all_day=item.all_day)
 
 
+def _is_due_marker(entry: OutlookEntry) -> bool:
+    """이 앱이 만든 마감 표시인가."""
+
+    categories = [part.strip() for part in (entry.category or "").split(",")]
+    return DUE_MARKER_CATEGORY in categories
+
+
 def _entry_interval(entry: OutlookEntry) -> tuple[datetime, datetime] | None:
-    if entry.item_type != CALENDAR:
+    if entry.item_type != CALENDAR or _is_due_marker(entry):
+        # 마감 표시는 하루를 차지하지만 일정이 아니다. 겹침으로 세면 그날의
+        # 실제 일정 등록이 모두 막힌다.
         return None
     return _calendar_interval(entry.start, entry.end, all_day=entry.all_day)
 
@@ -151,9 +163,11 @@ class WorkflowService:
         self,
         database: Database | None = None,
         outlook: OutlookAdapter | None = None,
+        mirror: OutlookMirror | None = None,
     ) -> None:
         self.database = database or Database(DATABASE_PATH)
         self.outlook = outlook or OutlookAdapter()
+        self.mirror = mirror or OutlookMirror(self.database)
 
     # --- analysis -----------------------------------------------------
 
@@ -331,13 +345,27 @@ class WorkflowService:
             return f"기존 Outlook 작업과 같아 제외: {self._entry_label(entry)}"
         return None
 
+    def known_entries(self) -> list[OutlookEntry]:
+        """Return what this app believes the Outlook profile currently holds.
+
+        Reads come from the local mirror so that registering one card does not
+        pay for a full COM scan.  The mirror is kept current by the background
+        sync thread and by write-through after every registration.  Before the
+        first sync lands there is nothing to compare against, so that one case
+        still reads Outlook directly.
+        """
+
+        if self.mirror.has_snapshot():
+            self.mirror.refresh_if_stale()
+            return self.mirror.entries()
+        return self.outlook.read_entries(limit=10000)
+
     def find_conflicts(self, drafts: list[WorkItem]) -> dict[int, str]:
         """Find Calendar overlaps and exact Todo duplicates before registration.
 
-        The Outlook read is intentionally done immediately before presenting
-        the cards and again immediately before saving.  That keeps the fast
-        review UI useful while protecting against an item created by another
-        program between those two moments.
+        Called immediately before presenting the cards and again immediately
+        before saving, so an item created between those two moments is still
+        caught as long as the mirror has seen it.
         """
 
         if not any(
@@ -346,7 +374,7 @@ class WorkflowService:
         ):
             return {}
 
-        entries = self.outlook.read_entries(limit=10000)
+        entries = self.known_entries()
         conflicts: dict[int, str] = {}
         accepted: list[WorkItem] = []
 
@@ -455,7 +483,11 @@ class WorkflowService:
                 self.database.mark_saved(item.id, entry_id)
                 item.saved = True
                 item.outlook_entry_id = entry_id
+                # 방금 만든 항목을 미러에 바로 반영해 다음 카드의 중복 검사가
+                # 다음 주기 동기화를 기다리지 않게 한다.
+                self.mirror.write_through(item)
                 outcome.saved += 1
+                self._add_due_marker(item, outcome)
             except (
                 OSError,
                 ValueError,
@@ -472,6 +504,53 @@ class WorkflowService:
                     except OSError:
                         pass
         return outcome
+
+    def _existing_due_marker(self, item: WorkItem) -> bool:
+        """같은 제목·같은 날짜의 마감 표시가 이미 있는가."""
+
+        if not item.due:
+            return False
+        try:
+            due_date = parse_outlook_datetime(item.due).date()
+        except ValueError:
+            return False
+        subject = _normalise_title(due_marker_subject(item.title))
+        for entry in self.mirror.entries():
+            if entry.item_type != CALENDAR or not _is_due_marker(entry):
+                continue
+            if entry.start is None or entry.start.date() != due_date:
+                continue
+            if _normalise_title(entry.subject) == subject:
+                return True
+        return False
+
+    def _add_due_marker(self, item: WorkItem, outcome: RecordOutcome) -> None:
+        """마감 작업을 캘린더에도 표시한다.
+
+        작업은 이미 Outlook에 들어갔으므로, 표시를 만들지 못해도 등록 자체를
+        실패로 되돌리지 않습니다. 사유만 경고로 남깁니다.
+        """
+
+        if not item.wants_due_marker or item.calendar_entry_id:
+            return
+        try:
+            if self._existing_due_marker(item):
+                return
+            marker_id = self.outlook.save_due_marker(item)
+        except (
+            AttributeError,
+            OSError,
+            ValueError,
+            OutlookUnavailableError,
+            OutlookOperationError,
+        ) as exc:
+            note = f"마감 캘린더 표시를 만들지 못했습니다: {exc}"
+            outcome.warning = f"{outcome.warning} · {note}" if outcome.warning else note
+            return
+        item.calendar_entry_id = marker_id
+        if item.id is not None:
+            self.database.mark_due_marker(item.id, marker_id)
+        self.mirror.write_through_due_marker(item)
 
     def test_outlook(self) -> str:
         return self.outlook.test_connection()

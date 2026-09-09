@@ -27,6 +27,16 @@ ACTION_NONE = "none"                    # 참조
 REPEAT_FREQS = ("none", "daily", "weekly", "monthly")
 OUTLOOK_STATUSES = ("pending", "saved", "failed", "deleted")
 
+# Outlook 작업은 캘린더에 나타나지 않는다. 마감이 있는 작업은 마감 당일에 종일
+# 표시를 하나 더 만들어 캘린더에서도 보이게 한다. 이 표시는 범주로 구분해
+# 시간 겹침 검사에서 제외한다. 그렇지 않으면 마감일마다 하루가 통째로 막힌다.
+DUE_MARKER_CATEGORY = "마감"
+DUE_MARKER_PREFIX = "[마감]"
+
+
+def due_marker_subject(title: str) -> str:
+    return f"{DUE_MARKER_PREFIX} {title}".strip()
+
 # 의미 추출 v2.  `action`은 화면/Outlook 대상용 파생값으로 남겨 두고,
 # 실제로 어떤 행동인지와 적용 조건은 별도 필드에 보존한다.
 INTENTS = (
@@ -222,6 +232,9 @@ class WorkItem:
     # UI-only guard.  A draft can be excluded before it reaches Outlook when
     # an existing item occupies the same slot or is an exact Todo duplicate.
     excluded_reason: str | None = None
+    # 마감이 있는 작업을 캘린더에도 표시할지. 표시하면 Outlook 항목이 둘 생긴다.
+    show_due_on_calendar: bool = True
+    calendar_entry_id: str | None = None
     # Semantic extraction v2. These defaults keep older rows and JSON input
     # compatible while preserving the meaning behind a registration draft.
     intent: str = "other"
@@ -280,6 +293,16 @@ class WorkItem:
         return bool(self.blocking_review_issues) or self.applicability == "unknown"
 
     @property
+    def wants_due_marker(self) -> bool:
+        """마감 당일 캘린더 표시를 만들어야 하는 항목인가."""
+
+        return (
+            self.show_due_on_calendar
+            and self.outlook_target == TODO
+            and bool(self.due)
+        )
+
+    @property
     def can_register(self) -> bool:
         return (
             self.outlook_target is not None
@@ -301,6 +324,7 @@ class WorkItem:
             "evidence": [item.to_dict() for item in self.evidence],
             "review_issues": [issue.to_dict() for issue in self.review_issues],
             "group_id": self.group_id,
+            "show_due_on_calendar": self.show_due_on_calendar,
         }
 
     def validate(self) -> None:
@@ -396,6 +420,8 @@ class WorkItem:
             evidence=evidence,
             review_issues=issues,
             group_id=_optional_string(semantic.get("group_id")),
+            show_due_on_calendar=bool(semantic.get("show_due_on_calendar", True)),
+            calendar_entry_id=_optional_string(value("calendar_entry_id")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -433,4 +459,5 @@ class WorkItem:
             "evidence": [item.to_dict() for item in self.evidence],
             "review_issues": [issue.to_dict() for issue in self.review_issues],
             "group_id": self.group_id,
+            "show_due_on_calendar": self.show_due_on_calendar,
         }

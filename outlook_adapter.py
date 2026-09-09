@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from models import CALENDAR, TODO, WorkItem
+from models import CALENDAR, DUE_MARKER_CATEGORY, TODO, WorkItem, due_marker_subject
 
 try:
     import win32com.client as win32_client
@@ -475,6 +475,41 @@ class OutlookAdapter:
         if target == CALENDAR:
             return self._save_calendar(work_item)
         return self._save_task(work_item)
+
+    def save_due_marker(self, work_item: WorkItem) -> str | None:
+        """마감일에 종일 표시를 하나 만들어 캘린더에서도 보이게 한다.
+
+        Outlook 작업은 캘린더에 나타나지 않으므로, 마감이 있는 작업은 작업과
+        이 표시가 함께 만들어집니다. 표시는 범주로 구분해 시간 겹침 검사에서
+        빼기 때문에 그날의 다른 일정 등록을 막지 않습니다.
+        """
+
+        if not work_item.due:
+            raise OutlookOperationError("마감일이 없어 캘린더 표시를 만들 수 없습니다.")
+        try:
+            due = parse_outlook_due(work_item.due)
+            start = datetime.combine(due.date(), time.min)
+            outlook_item = self._application().CreateItem(self.CALENDAR_ITEM)
+            outlook_item.Subject = due_marker_subject(work_item.title)
+            _set_appointment_times(
+                outlook_item, start, datetime.combine(
+                    start.date() + timedelta(days=1), time.min
+                )
+            )
+            outlook_item.AllDayEvent = True
+            outlook_item.BusyStatus = 0  # olFree — 하루를 막지 않는다.
+            outlook_item.Body = _outlook_body(work_item)
+            categories = [DUE_MARKER_CATEGORY]
+            if work_item.category:
+                categories.append(work_item.category)
+            outlook_item.Categories = ", ".join(categories)
+            outlook_item.ReminderSet = False
+            outlook_item.Save()
+            return str(getattr(outlook_item, "EntryID", "") or "") or None
+        except OutlookOperationError:
+            raise
+        except Exception as exc:
+            raise OutlookOperationError(f"마감 캘린더 표시 생성 실패: {exc}") from exc
 
     def _save_calendar(self, work_item: WorkItem) -> str | None:
         if not work_item.start:
